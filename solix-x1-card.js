@@ -26,7 +26,7 @@
 (() => {
   "use strict";
   const TAG = "solix-x1-card";
-  const VERSION = "1.0.0";
+  const VERSION = "1.0.1";
   if (customElements.get(TAG)) return;
 
   const DAY = 864e5, HOUR = 36e5, FIVE_MIN = 3e5;
@@ -210,16 +210,15 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .flow .charge { stroke: none; }
 .flow .mark { fill: none; stroke: var(--x1-ink); stroke-width: 1; }
 .flow .wire { fill: none; stroke: var(--x1-grid-line); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.flow .wire.on { stroke-width: 4; stroke-opacity: .55; }
+.flow .wire.on { stroke-opacity: .9; }
+.flow .lane { fill: none; stroke-width: 2; stroke-opacity: .35; stroke-linecap: round; stroke-linejoin: round; }
 .flow .port { font-size: var(--x1-fs-small); fill: var(--x1-ink2); paint-order: stroke; stroke: var(--x1-surface); stroke-width: 4px; stroke-linejoin: round; }
 .flow .lead { stroke: var(--x1-ink2); stroke-width: 1; stroke-dasharray: 1 3; stroke-linecap: round; }
 .flow .tag { fill: var(--x1-surface); fill-opacity: .94; stroke: var(--x1-grid-line); stroke-width: 1; }
 .flow .port.v { fill: var(--x1-ink); font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; }
 /* the flow: short beads every 10 px along the solid line, drifting at 1.83 px a second before the playback rate */
-.flow .dots { fill: none; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 2 8; animation: x1-drift 5.45s linear infinite; }
-.flow .dots.k3 { animation-name: x1-drift3; animation-duration: 16.36s; }
-@keyframes x1-drift { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -10px; } }
-@keyframes x1-drift3 { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -30px; } }
+.flow .dots { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2.5 3.5; animation: x1-drift 3.27s linear infinite; }
+@keyframes x1-drift { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -6px; } }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
 .sw.hatch { background: repeating-linear-gradient(45deg, var(--x1-solar) 0 1.8px, transparent 1.8px 5px); }
 
@@ -324,7 +323,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .xf { position: relative; animation: x1-ink 220ms ease-out both; }
 .xf::after { content: attr(data-old); position: absolute; left: 0; top: 0; color: var(--x1-ink); white-space: nowrap; pointer-events: none; animation: x1-fade 220ms ease-out both; }
 @keyframes x1-ink { from { color: transparent; } }
-@media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .xf, .flow .dots, .flow .dots.k3 { animation: none; } .xf::after { content: none; } .ring .arc { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .xf, .flow .dots { animation: none; } .xf::after { content: none; } .ring .arc { transition: none; } }
 @media (forced-colors: active) {
   .mg-p, .flow, .ring, .rg svg, .lamp i, .sw, .ck .sw { forced-color-adjust: none; }
   .seg button[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
@@ -948,49 +947,41 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const towerLb = (i) => t0 + i * (tw + tg);
       const soc = L.soc === null ? null : clamp(L.soc, 0, 100) / 100, resZ = (L.reserve / 100) * th;
       const hubL = P(-hd, hubB - hw, hubZ), hubR = P(-hd, hubB + hw, hubZ), hubT = P(-hd, hubB, hubZ + hh), hubD = P(-hd, hubB, hubZ - hh);
-      // every wire carries the colour of the energy on it: the house wire is fed by up to three sources, the battery
-      // wire by two while charging, a sale by solar and the battery, so their dots take turns by share
-      // a direction counts only above the threshold its figure uses, so a trickle never reads as charging or selling
+      // Every wire carries one lane per source of the energy on it, side by side in the source's colour: the house
+      // line can carry solar, the battery and the grid at once, the battery line solar and the grid while charging,
+      // the grid line solar and the battery while selling. A wire never carries power both ways at once (the cloud
+      // reports net flows), so lanes are sources, not directions. Each lane's beads drift at a speed set by its power.
+      // A direction counts only above the threshold its figure uses, so a trickle never reads as charging or selling.
       const charging = L.chg > 0.05 && L.chg > L.dis, selling = L.exp > 0.05 && L.exp > L.imp;
       const wires = [
-        ["solar", [onRoof(aa0, pb1), P(0, hubB, zR - 0.1), hubT], L.solar > 0.05, false, { solar: L.solar }],
-        ["home", [P(LN, 0, hubZ), P(0, 0, hubZ), hubL], L.home > 0.05, true, { solar: L.flows.Sh, batt: L.flows.Bh, grid: L.flows.Gh }],
-        ["batt", [P(0, t0, 0.22), P(0, hubB, 0.22), hubD], Math.max(L.chg, L.dis) > 0.05, charging, charging ? { solar: L.flows.Sb, grid: L.flows.Gb } : { batt: L.dis }],
-        ["grid", [P(0, poleB, hubZ), P(0, D, hubZ), hubR], Math.max(L.imp, L.exp) > 0.05, selling, selling ? { solar: L.flows.Sg, batt: L.flows.Bg } : { grid: L.imp }],
+        ["solar", [onRoof(aa0, pb1), P(0, hubB, zR - 0.1), hubT], false, { solar: L.solar }],
+        ["home", [P(LN, 0, hubZ), P(0, 0, hubZ), hubL], true, { solar: L.flows.Sh, batt: L.flows.Bh, grid: L.flows.Gh }],
+        ["batt", [P(0, t0, 0.22), P(0, hubB, 0.22), hubD], charging, charging ? { solar: L.flows.Sb, grid: L.flows.Gb } : { batt: L.dis }],
+        ["grid", [P(0, poleB, hubZ), P(0, D, hubZ), hubR], selling, selling ? { solar: L.flows.Sg, batt: L.flows.Bg } : { grid: L.imp }],
       ];
+      const LANE = 3.5, ORDER = ["solar", "batt", "grid"];
       const maxP = Math.max(0.5, L.solar, L.imp, L.exp, L.chg, L.dis, L.home);
-      const power = { solar: L.solar, grid: Math.max(L.imp, L.exp), batt: Math.max(L.chg, L.dis), home: L.home };
-      // the strands of a wire: three dot slots per cycle shared out by each source's share, at least one each
-      const SLOT = 10, DASH = 2, DUR = (6 * SLOT) / 11, ONE = `${DASH} ${SLOT - DASH}`;
-      const strands = (shares) => {
-        const on = Object.entries(shares).filter(([, v]) => v > 0.05).sort((a, b) => b[1] - a[1]);
-        if (!on.length) return [["var(--x1-ink2)", ONE, 0, 1]];
-        if (on.length === 1) return [[`var(--x1-${on[0][0]})`, ONE, 0, 1]];
-        const slots = 3, tot = on.reduce((a, [, v]) => a + v, 0);
-        const raw = on.map(([, v]) => (v / tot) * slots), alloc = raw.map((r) => Math.max(1, Math.floor(r)));
-        let left = slots - alloc.reduce((a, b) => a + b, 0);
-        for (const [, i] of raw.map((r, i) => [r - Math.floor(r), i]).sort((a, b) => b[0] - a[0])) { if (left <= 0) break; alloc[i]++; left--; }
-        while (left < 0) { alloc[alloc.indexOf(Math.max(...alloc))]--; left++; }
-        const owner = []; alloc.forEach((n, i) => { for (let q = 0; q < n; q++) owner.push(i); });
-        return on.map(([key], i) => {
-          const first = owner.indexOf(i), arr = []; let q = 0;
-          while (q < slots) { if (owner[(first + q) % slots] === i) { let u = 0; while (q + 1 + u < slots && owner[(first + q + 1 + u) % slots] !== i) u++; arr.push(DASH, SLOT - DASH + SLOT * u); q += 1 + u; } else q++; }
-          return [`var(--x1-${key})`, arr.join(" "), SLOT * first, slots];
+      const rateOf = (kw) => 6 / (6 - 5 * Math.min(1, kw / maxP));
+      // a polyline moved sideways by d px, with mitred corners, so parallel lanes keep their spacing round a bend
+      const shift = (pts, d) => {
+        if (!d) return pts;
+        const nrm = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; };
+        return pts.map((q, i) => {
+          const n0 = i > 0 ? nrm(pts[i - 1], q) : null, n1 = i < pts.length - 1 ? nrm(q, pts[i + 1]) : null;
+          if (!n0 || !n1) { const n = n0 ?? n1; return [q[0] + n[0] * d, q[1] + n[1] * d]; }
+          const m = [n0[0] + n1[0], n0[1] + n1[1]], ml = Math.hypot(m[0], m[1]) || 1, k = d / Math.max(0.3, (m[0] * n0[0] + m[1] * n0[1]) / ml);
+          return [q[0] + (m[0] / ml) * k, q[1] + (m[1] / ml) * k];
         });
       };
-      // a run is points, or a curve {c, p} to a point; it is walked backwards when the power leaves the hub
-      const walk = (pts, back) => {
-        const at = (q) => (q.p ? q.p : q);
-        if (!back) return `M${pt(at(pts[0]))}` + pts.slice(1).map((q) => (q.c ? `Q${pt(q.c)} ${pt(q.p)}` : `L${pt(q)}`)).join("");
-        let d = `M${pt(at(pts[pts.length - 1]))}`;
-        for (let i = pts.length - 1; i > 0; i--) { const seg = pts[i], prev = at(pts[i - 1]); d += seg.c ? `Q${pt(seg.c)} ${pt(prev)}` : `L${pt(prev)}`; }
-        return d;
-      };
+      const path = (pts, back) => { const q = back ? [...pts].reverse() : pts; return `M${q.map(pt).join("L")}`; };
       const live = [];
-      for (const [key, pts, on, away, shares] of wires) {
-        const d = walk(pts, away), st = strands(shares), rate = 6 / (6 - 5 * Math.min(1, power[key] / maxP));
-        g += `<path class="wire${on ? " on" : ""}" d="${d}"${on ? ` stroke="${st[0][0]}"` : ""}/>`;
-        live.push({ key, d, on, st, rate });
+      for (const [key, pts, away, shares] of wires) {
+        const srcs = ORDER.filter((k) => (shares[k] ?? 0) > 0.05), n = srcs.length;
+        // the lanes are laid out on the wire as drawn toward the hub, so a change of direction never swaps them
+        const lanes = srcs.map((src, i) => ({ src, kw: shares[src], col: `var(--x1-${src})`, d: path(shift(pts, (i - (n - 1) / 2) * LANE), away) }));
+        g += `<path class="wire${n ? " on" : ""}" d="${path(pts, away)}"${n ? ` stroke-width="${(n * LANE + 2.5).toFixed(1)}"` : ""}/>`;
+        for (const l of lanes) g += `<path class="lane" d="${l.d}" stroke="${l.col}"/>`;
+        live.push({ key, lanes });
       }
       g += box(-hd, hubB - hw, hubZ - hh, hd, 2 * hw, 2 * hh, "hub", "var(--x1-plate)", "gable");
       // the towers, the farthest first so the nearer ones stand in front of it
@@ -1031,15 +1022,12 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       // old data draws no drift: the wires keep their colours, the dots stand still until a fresh report
       const motion = this._motion() && !L.stale && L.state !== "unknown";
       for (const w of live) for (let i = 0; i < 3; i++) {
-        const el = svg.querySelector(`[data-w="${w.key}"][data-i="${i}"]`), st = w.on && motion ? w.st[i] : null;
-        if (!st) { setA(el, "visibility", "hidden"); continue; }
-        const [col, dash, off, slots] = st;
-        setA(el, "d", w.d); setA(el, "stroke", col); setA(el, "stroke-dasharray", dash); setA(el, "class", `dots${slots === 3 ? " k3" : ""}`); setA(el, "visibility", "visible");
-        // a strand's phase is its slot, set as a negative delay; its speed is the playback rate, so neither a tick
-        // nor a change of power restarts the drift
-        const delay = `${(-(off * DUR) / SLOT).toFixed(2)}s`;
-        if (el.style.animationDelay !== delay) el.style.animationDelay = delay;
-        if (el.getAnimations) for (const a of el.getAnimations()) if (Math.abs(a.playbackRate - w.rate) > 0.01) a.playbackRate = w.rate;
+        const el = svg.querySelector(`[data-w="${w.key}"][data-i="${i}"]`), lane = motion ? w.lanes[i] : null;
+        if (!lane) { setA(el, "visibility", "hidden"); continue; }
+        setA(el, "d", lane.d); setA(el, "stroke", lane.col); setA(el, "visibility", "visible");
+        // each lane's speed is its animation's playback rate, so neither a tick nor a change of power restarts it
+        const rate = rateOf(lane.kw);
+        if (el.getAnimations) for (const a of el.getAnimations()) if (Math.abs(a.playbackRate - rate) > 0.01) a.playbackRate = rate;
       }
       // The top two labels take open sky where the drawing leaves it, measured against its top edge: the ridge up to
       // its near end, then the back slope's rake falling away. Grid stands over its pole; Solar stands as far over

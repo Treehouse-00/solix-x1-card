@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- **One lane per source.** A line that carries power from more than one source now carries a thin lane for each, side by side in its own colour: solar and the battery feeding the house together show as amber beside green, where before the battery's colour covered the solar it ran with.
+- **Finer beads.** The beads are thinner, with shorter gaps, so each lane reads as one continuous line.
+
 ## 1.0.0
 
 The first release.
