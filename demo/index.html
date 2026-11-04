@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solix X1 Card · demo</title>
+<style>
+  /* The two Roboto faces Home Assistant's frontend preloads (Apache 2.0). */
+  @font-face { font-family: Roboto; font-weight: 400; src: url(fonts/Roboto-Regular.woff2) format("woff2"); }
+  @font-face { font-family: Roboto; font-weight: 500; src: url(fonts/Roboto-Medium.woff2) format("woff2"); }
+  /* Home Assistant's default theme variables, light and dark. */
+  :root {
+    --primary-background-color: #fafafa; --card-background-color: #ffffff; --ha-card-background: #ffffff;
+    --primary-text-color: #212121; --secondary-text-color: #727272; --divider-color: rgba(0,0,0,.12);
+    --primary-color: #03a9f4; --ha-card-border-radius: 12px; --ha-card-border-color: #e0e0e0;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --primary-background-color: #111111; --card-background-color: #1c1c1c; --ha-card-background: #1c1c1c;
+    --primary-text-color: #e1e1e1; --secondary-text-color: #9b9b9b; --divider-color: rgba(225,225,225,.12);
+    --ha-card-border-color: rgba(225,225,225,.12);
+    color-scheme: dark;
+  }
+  html { --ha-font-family-body: Roboto, Noto, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--primary-background-color); color: var(--primary-text-color); font-family: Roboto, Noto, sans-serif; font-size: 14px; }
+  body.shot nav { display: none; }
+  nav { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 8px 16px; font-size: 12px; border-bottom: 1px solid var(--divider-color); }
+  nav b { font-weight: 500; margin-right: 6px; }
+  nav a { color: var(--secondary-text-color); }
+  nav a[aria-current] { color: var(--primary-text-color); font-weight: 500; }
+  nav .src { margin-left: auto; }
+  #stage { margin: 0 auto; }
+</style>
+</head>
+<body>
+<nav>
+  <b>Solix X1 Card</b>
+  <a href="?theme=light">light</a>
+  <a href="?theme=dark">dark</a>
+  <a href="?theme=light&amp;at=12:30">noon</a>
+  <a href="?theme=dark&amp;at=20:30">evening</a>
+  <a href="?theme=dark&amp;at=05:30">dawn</a>
+  <a href="?theme=light&amp;view=week">week</a>
+  <a href="?theme=light&amp;view=month">month</a>
+  <a href="?theme=light&amp;view=year">year</a>
+  <a href="?theme=light&amp;rate=0.38">tariff</a>
+  <a href="?theme=light&amp;w=760">tablet</a>
+  <a href="?theme=dark&amp;w=375">phone</a>
+  <a class="src" href="https://github.com/Treehouse-00/solix-x1-card">invented data · source on GitHub</a>
+</nav>
+<div id="stage"></div>
+<script src="../solix-x1-card.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "Solix X1 Card",
+  "filename": "solix-x1-card.js",
+  "render_readme": true,
+  "homeassistant": "2025.12.0"
+}
