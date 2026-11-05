@@ -5,9 +5,10 @@
  * cloud reports), history from the cloud's own statistics through the integration's raw-request action, so
  * the day, week, month and year views are the Anker app's figures from the first day.
  *
- * Layout: on a laptop, one screen cut to the window's height: a Now column (the battery, a sentence, the home
- * drawn with its power flowing) and a period column (the title bar, six headline figures, a power chart and a
- * battery chart on one time axis, the meaning row). Narrower screens stack the same parts and scroll.
+ * Layout: on a laptop, one screen cut to the window's height: on the left a column for the period (the title bar,
+ * the home drawn with its power flowing beside the battery's ring, the power chart), on the right a column for the
+ * place (its name, the period's six headline figures, the battery's charge on a small chart, the period's meaning).
+ * The two charts read the same moment. A phone stacks the parts, the house and its battery first, and scrolls.
  *
  * Rules the screen keeps: every figure derives from the same flows (solar = to home + to battery + to grid;
  * home = from solar + from battery + from grid); directions are words, signs live only in the chart; the
@@ -27,7 +28,7 @@
 (() => {
   "use strict";
   const TAG = "solix-x1-card";
-  const VERSION = "1.0.7";
+  const VERSION = "1.0.22";
   if (customElements.get(TAG)) return;
 
   const DAY = 864e5, HOUR = 36e5, FIVE_MIN = 3e5;
@@ -44,13 +45,26 @@
   const fin = (v) => (Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const pad2 = (n) => String(n).padStart(2, "0");
-  // the sources' icons above the drawing, each filled in its source's colour: the sun, a battery standing like the
-  // towers, and a power plant for the grid
+  // the sources' icons above the drawing, each filled in its source's colour: the sun, a battery on its side with its
+  // terminal a pixel clear of the body, and a power plant for the grid
   const ICONS = {
-    solar: `<svg class="pi solar" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4"/><path d="M10 1.9v2.4M10 15.7v2.4M1.9 10h2.4M15.7 10h2.4M4.27 4.27l1.7 1.7M14.03 14.03l1.7 1.7M4.27 15.73l1.7-1.7M14.03 5.97l1.7-1.7"/></svg>`,
-    batt: `<svg class="pi batt" viewBox="0 0 20 20" aria-hidden="true"><rect x="7.6" y="1.6" width="4.8" height="2.4" rx=".8"/><rect x="5.2" y="3.4" width="9.6" height="15" rx="2"/></svg>`,
-    grid: `<svg class="pi grid" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 18.4v-7.6l4.1 2.6v-2.6l4.1 2.6v-2.6l4.1 2.6V2.6h3.4v15.8Z"/></svg>`,
+    // one family on a 20-unit grid: each box centred on 10,10, about a third of the square in ink, corners softened like the
+    // battery's. The sun and the plant are drawn half a unit inside their size and stroked back out by a grade per theme
+    // (--x1-grade-*), so each carries the same weight on either ground; the battery is the ungraded reference
+    solar: `<svg class="pi solar" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.9"/><path d="M16.7 10L18.4 10M14.74 14.74L15.94 15.94M10 16.7L10 18.4M5.26 14.74L4.06 15.94M3.3 10L1.6 10M5.26 5.26L4.06 4.06M10 3.3L10 1.6M14.74 5.26L15.94 4.06"/></svg>`,
+    batt: `<svg class="pi batt" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.8" y="5.3" width="14.4" height="9.4" rx="3"/><rect x="17.2" y="7.6" width="1.8" height="4.8" rx=".9"/></svg>`,
+    grid: `<svg class="pi grid" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.9 16.9V11.1l3.7 2.2V11.1l3.7 2.2V11.1l3.7 2.2V3.3h2.8v13.6Z"/></svg>`,
   };
+  // The drawing's frame, in metres of house: D deep, LN long, HT to the eaves, R the roof's rise, e the overhang; the
+  // service pole in the gable's plane just past the overhang; the array's columns. Across, the frame runs from just past
+  // the panels' far corner (UL) to the pole's crossarm (UR), SPAN in all, at 0.707 k a metre; TOP is the figures' band.
+  const FLOW = (() => {
+    const D = 8.6, LN = 12, HT = 3, R = 2.4, e = 0.5, td = 0.375;
+    const poleA = 0, poleB0 = D + e + 0.25, poleR = 0.12, arm1 = 0.6, arm2 = 0.42;
+    const cols = 4, rows = 2, cw = 1.4, aa0 = 0.35, aa1 = aa0 + cols * cw, pb0 = 0.6, pb1 = D / 2 - 0.55;
+    const UL = -0.707 * (aa1 - pb0) - 0.25, UR = 0.707 * (poleB0 - poleA + arm1) + 0.12;
+    return { D, LN, HT, R, e, td, poleA, poleB0, poleR, arm1, arm2, cols, rows, cw, aa0, aa1, pb0, pb1, UL, UR, SPAN: UR - UL, TOP: 10 };
+  })();
   // The panels' pixels light in one fixed random order, the same on every screen: a pixel lit at 2 kW stays lit at
   // 3 kW, so a change of power lights or darkens a few more and never reshuffles the rest.
   const PANELS = 8, PX = 48;
@@ -128,7 +142,11 @@
   const STYLE = `
 :host {
   display: block;
-  --x1-solar: #eda100; --x1-batt: #2f9e5b; --x1-grid: #6250d6; --x1-home: var(--x1-ink);
+  /* the sources keep one colour everywhere: solar amber, the battery blue, the grid violet; solar sold is green.
+     The blue and the violet are set apart in lightness so they part for colour-blind eyes too (validated pairwise) */
+  --x1-solar: #eda100; --x1-batt: #43a3e8; --x1-grid: #7b3fbf; --x1-sold: #2f9e5b; --x1-home: var(--x1-ink);
+  /* the icons' grade: amber is the faintest of the three on white and violet the faintest on black, so each is drawn a little fuller there */
+  --x1-grade-solar: 1.5px; --x1-grade-grid: .5px;
   --x1-solar-tint: color-mix(in srgb, var(--x1-solar) 40%, var(--x1-surface)); --x1-grid-tint: color-mix(in srgb, var(--x1-grid) 40%, var(--x1-surface));
   --x1-muted: #898781; --x1-grid-line: #e1e0d9; --x1-axis: #c3c2b7; --x1-wash: rgba(11,11,11,0.035);
   --x1-on: #ffffff; --x1-off: #2f7fe0; --x1-fault: #d03b3b;
@@ -145,20 +163,31 @@
   --x1-gap: var(--ha-space-4, 16px);
   --x1-pad: var(--ha-space-5, 20px);
   --x1-well: color-mix(in srgb, var(--x1-ink) 3%, var(--x1-surface));
-  /* the sun stands high at the upper right: the roof takes the most light, the gable less, the long wall least, and
-     the roof's edges are a darker trim; planes meet by value, never by an outline */
-  --x1-wall: color-mix(in srgb, var(--x1-ink) 13%, var(--x1-surface)); --x1-gable: color-mix(in srgb, var(--x1-ink) 6.5%, var(--x1-surface));
-  --x1-roof: color-mix(in srgb, var(--x1-ink) 19%, var(--x1-surface)); --x1-roof-back: color-mix(in srgb, var(--x1-ink) 13%, var(--x1-surface));
-  --x1-trim: color-mix(in srgb, var(--x1-ink) 32%, var(--x1-surface)); --x1-trim-g: color-mix(in srgb, var(--x1-ink) 24%, var(--x1-surface));
-  --x1-box: color-mix(in srgb, var(--x1-ink) 10.5%, var(--x1-surface)); --x1-box-top: color-mix(in srgb, var(--x1-ink) 4%, var(--x1-surface));
-  --x1-shadow: rgba(0, 0, 0, .12); --x1-frame: color-mix(in srgb, var(--x1-ink) 6%, var(--x1-surface));
+  /* a tile: a surface inside a card, set apart by its own tone, so it reads in a theme that draws no card borders */
+  --x1-tile: color-mix(in srgb, var(--x1-ink) 4%, var(--x1-surface)); --x1-tile-line: color-mix(in srgb, var(--x1-ink) 11%, var(--x1-surface)); --x1-tile-r: 8px;
+  /* The sun stands high at the upper right. Each plane of the house takes the light its facing gets: the back slope the
+     most, the front slope next, the gable and the long wall only the sky's. A light theme draws the house high in key, a
+     dark one low, and in both the lit planes are the lightest; inside each plane a gradient carries the light (the
+     ridge catching it, the wall dark under the eave, the feet occluded), and planes meet by value, never by an outline.
+     --x1-key is the ink the house is toned with, a little cool, toward the panels' glass. */
+  --x1-key: color-mix(in srgb, var(--x1-ink) 88%, #3f5f99);
+  --x1-roof-back: color-mix(in srgb, var(--x1-key) 6%, var(--x1-surface));
+  --x1-roof-hi: color-mix(in srgb, var(--x1-key) 5.5%, var(--x1-surface)); --x1-roof: color-mix(in srgb, var(--x1-key) 8.5%, var(--x1-surface)); --x1-roof-lo: color-mix(in srgb, var(--x1-key) 12%, var(--x1-surface));
+  --x1-gable-hi: color-mix(in srgb, var(--x1-key) 10%, var(--x1-surface)); --x1-gable: color-mix(in srgb, var(--x1-key) 14%, var(--x1-surface)); --x1-gable-lo: color-mix(in srgb, var(--x1-key) 18%, var(--x1-surface));
+  --x1-wall-hi: color-mix(in srgb, var(--x1-key) 18%, var(--x1-surface)); --x1-wall: color-mix(in srgb, var(--x1-key) 21%, var(--x1-surface)); --x1-wall-lo: color-mix(in srgb, var(--x1-key) 27%, var(--x1-surface)); --x1-wall-foot: color-mix(in srgb, var(--x1-key) 24%, var(--x1-surface));
+  --x1-trim: color-mix(in srgb, var(--x1-key) 13%, var(--x1-surface)); --x1-trim-g: color-mix(in srgb, var(--x1-key) 16.5%, var(--x1-surface));
+  --x1-box: color-mix(in srgb, var(--x1-key) 13%, var(--x1-surface)); --x1-box-top: color-mix(in srgb, var(--x1-key) 5%, var(--x1-surface));
+  --x1-shadow: rgba(16, 22, 38, .16); --x1-frame: color-mix(in srgb, var(--x1-ink) 6%, var(--x1-surface));
   --x1-cab: color-mix(in srgb, var(--x1-batt) 19%, var(--x1-surface)); --x1-cab-lit: color-mix(in srgb, var(--x1-batt) 11%, var(--x1-surface)); --x1-cab-top: color-mix(in srgb, var(--x1-batt) 7%, var(--x1-surface));
-  --x1-plate-side: color-mix(in srgb, var(--x1-ink) 22%, var(--x1-plate)); --x1-hi: rgba(255, 255, 255, .75);
-  --x1-cast: #1a1e2e; --x1-cast-a: .11; --x1-pshade-a: .2;
+  --x1-plate-front: color-mix(in srgb, var(--x1-plate) 95%, #000); --x1-plate-top: color-mix(in srgb, var(--x1-plate) 55%, #fff); --x1-plate-side: color-mix(in srgb, var(--x1-plate) 72%, #000);
+  --x1-cast: #1a1e2e; --x1-cast-a: .2; --x1-pshade-a: .2;
   --x1-batt-shade: color-mix(in srgb, var(--x1-batt) 80%, #000);
-  --x1-panel-off: color-mix(in srgb, #2c3a52 78%, var(--x1-surface)); --x1-panel-on: color-mix(in srgb, var(--x1-solar) 72%, var(--x1-surface));
-  --x1-window-on: color-mix(in srgb, var(--x1-solar) 45%, var(--x1-surface)); --x1-glass: color-mix(in srgb, var(--x1-ink) 34%, var(--x1-surface));
-  --x1-plate: #ffffff; --x1-wire-idle: color-mix(in srgb, var(--x1-ink) 26%, var(--x1-surface));
+  --x1-pole-dark: var(--x1-wall); --x1-pole-lit: var(--x1-gable); --x1-pole-top: color-mix(in srgb, var(--x1-ink) 2%, var(--x1-surface)); --x1-pole-edge: color-mix(in srgb, var(--x1-ink) 19%, var(--x1-surface));
+  /* the panels are glass: a sheen toward the sun at their upper right, deepening across them */
+  --x1-panel-off: color-mix(in srgb, #2c3a52 80%, var(--x1-surface)); --x1-panel-on: color-mix(in srgb, var(--x1-solar) 72%, var(--x1-surface));
+  --x1-panel-sheen: color-mix(in srgb, #4f6286 74%, var(--x1-surface)); --x1-panel-deep: color-mix(in srgb, #1f2a40 90%, var(--x1-surface));
+  /* a line carrying nothing shows faintly against the house: a quiet step from the planes it crosses, in both themes */
+  --x1-plate: #ffffff; --x1-wire-idle: color-mix(in srgb, var(--x1-ink) 34%, var(--x1-surface));
   --x1-batt-lit: color-mix(in srgb, var(--x1-batt) 78%, #fff); --x1-batt-top: color-mix(in srgb, var(--x1-batt) 58%, #fff);
   font-family: var(--ha-font-family-body, Roboto, Noto, sans-serif);
   font-size: var(--x1-fs-body); line-height: 20px; font-weight: var(--x1-w-regular);
@@ -166,44 +195,105 @@
   -webkit-font-smoothing: antialiased;
 }
 :host(.dark) {
-  --x1-solar: #f2b036; --x1-batt: #5ac28a; --x1-grid: #9085e9; --x1-grid-line: #34342f; --x1-axis: #4a4a43;
-  --x1-solar-tint: color-mix(in srgb, var(--x1-solar) 50%, var(--x1-surface)); --x1-grid-tint: color-mix(in srgb, var(--x1-grid) 50%, var(--x1-surface));
-  --x1-wall: color-mix(in srgb, var(--x1-ink) 12%, var(--x1-surface)); --x1-gable: color-mix(in srgb, var(--x1-ink) 19%, var(--x1-surface));
-  --x1-roof: color-mix(in srgb, var(--x1-ink) 26%, var(--x1-surface)); --x1-roof-back: color-mix(in srgb, var(--x1-ink) 32%, var(--x1-surface));
-  --x1-trim: color-mix(in srgb, var(--x1-ink) 22%, var(--x1-surface)); --x1-trim-g: color-mix(in srgb, var(--x1-ink) 34%, var(--x1-surface));
-  --x1-box: color-mix(in srgb, var(--x1-ink) 15%, var(--x1-surface)); --x1-box-top: color-mix(in srgb, var(--x1-ink) 24%, var(--x1-surface));
-  --x1-shadow: rgba(0, 0, 0, .34); --x1-frame: color-mix(in srgb, var(--x1-ink) 34%, var(--x1-surface));
+  --x1-solar: #f2b036; --x1-batt: #62b4f0; --x1-grid: #9468e6; --x1-sold: #5ac28a; --x1-grid-line: #34342f; --x1-axis: #4a4a43;
+  --x1-grade-solar: .8px; --x1-grade-grid: 1.6px;
+  --x1-tile: color-mix(in srgb, var(--x1-ink) 6.5%, var(--x1-surface)); --x1-tile-line: color-mix(in srgb, var(--x1-ink) 15%, var(--x1-surface));
+  --x1-solar-tint: color-mix(in srgb, var(--x1-solar) 66%, var(--x1-surface)); --x1-grid-tint: color-mix(in srgb, var(--x1-grid) 62%, var(--x1-surface));
+  --x1-roof-back: color-mix(in srgb, var(--x1-key) 12.5%, var(--x1-surface));
+  --x1-roof-hi: color-mix(in srgb, var(--x1-key) 14%, var(--x1-surface)); --x1-roof: color-mix(in srgb, var(--x1-key) 10.5%, var(--x1-surface)); --x1-roof-lo: color-mix(in srgb, var(--x1-key) 7%, var(--x1-surface));
+  --x1-gable-hi: color-mix(in srgb, var(--x1-key) 9.5%, var(--x1-surface)); --x1-gable: color-mix(in srgb, var(--x1-key) 5.5%, var(--x1-surface)); --x1-gable-lo: color-mix(in srgb, var(--x1-key) 1.5%, var(--x1-surface));
+  --x1-wall-hi: color-mix(in srgb, #000 16%, var(--x1-surface)); --x1-wall: color-mix(in srgb, #000 27%, var(--x1-surface)); --x1-wall-lo: color-mix(in srgb, #000 44%, var(--x1-surface)); --x1-wall-foot: color-mix(in srgb, #000 38%, var(--x1-surface));
+  --x1-trim: color-mix(in srgb, var(--x1-key) 3%, var(--x1-surface)); --x1-trim-g: color-mix(in srgb, var(--x1-key) 3.5%, var(--x1-surface));
+  --x1-box: color-mix(in srgb, var(--x1-key) 2%, var(--x1-surface)); --x1-box-top: color-mix(in srgb, var(--x1-key) 8%, var(--x1-surface));
+  --x1-shadow: rgba(0, 0, 0, .45); --x1-frame: color-mix(in srgb, var(--x1-key) 18%, var(--x1-surface));
   --x1-cab: color-mix(in srgb, var(--x1-batt) 14%, var(--x1-surface)); --x1-cab-lit: color-mix(in srgb, var(--x1-batt) 22%, var(--x1-surface)); --x1-cab-top: color-mix(in srgb, var(--x1-batt) 28%, var(--x1-surface));
-  --x1-batt-lit: color-mix(in srgb, var(--x1-batt) 80%, #fff); --x1-hi: rgba(255, 255, 255, .11);
-  --x1-cast: #000; --x1-cast-a: .4; --x1-pshade-a: .5;
-  --x1-panel-off: color-mix(in srgb, #34405a 70%, var(--x1-surface)); --x1-panel-on: color-mix(in srgb, var(--x1-solar) 76%, var(--x1-surface));
-  --x1-window-on: color-mix(in srgb, var(--x1-solar) 58%, var(--x1-surface)); --x1-glass: #20242c;
-  --x1-plate: #d9d9d3; --x1-wire-idle: color-mix(in srgb, var(--x1-ink) 40%, var(--x1-surface));
+  --x1-batt-lit: color-mix(in srgb, var(--x1-batt) 80%, #fff);
+  --x1-cast: #000; --x1-cast-a: .6; --x1-pshade-a: .55;
+  --x1-pole-dark: var(--x1-wall); --x1-pole-lit: var(--x1-gable); --x1-pole-top: var(--x1-roof-back); --x1-pole-edge: color-mix(in srgb, #000 40%, var(--x1-surface));
+  --x1-panel-off: color-mix(in srgb, #1a2540 82%, var(--x1-surface)); --x1-panel-on: color-mix(in srgb, var(--x1-solar) 76%, var(--x1-surface));
+  --x1-panel-sheen: color-mix(in srgb, #34476c 82%, var(--x1-surface)); --x1-panel-deep: color-mix(in srgb, #0a1120 86%, var(--x1-surface));
+  --x1-plate: #d9d9d3; --x1-wire-idle: color-mix(in srgb, var(--x1-ink) 26%, var(--x1-surface));
   --x1-wash: rgba(255,255,255,0.045); --x1-on: #e9e9e9; --x1-off: #6aa7f4; --x1-fault: #f06a5f;
 }
 * { box-sizing: border-box; }
 .wrap { margin: 0 auto; padding: var(--x1-gap); display: grid; gap: var(--x1-gap); max-width: 1680px; }
-/* the Now column takes a third of the width while the period column keeps 740 px for six readable headline cards */
-.wrap.wide { grid-template-columns: clamp(300px, min(34%, 100% - 740px), 460px) minmax(0, 1fr); height: var(--x1-h, auto); }
-.wrap.wide.tight { grid-template-columns: clamp(300px, 30%, 400px) minmax(0, 1fr); }
+/* the period's column on the left; the place's on the right, a third of the width, wide enough for the six figures
+   three to a row */
+.wrap.wide { grid-template-columns: minmax(0, 1fr) clamp(320px, 34%, 460px); height: var(--x1-h, auto); }
+.wrap.wide.tight { grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 400px); }
+.wide .col-period { grid-column: 1; grid-row: 1; }
+.wide .col-now { grid-column: 2; grid-row: 1; }
 .col-now, .col-period { display: flex; flex-direction: column; gap: var(--x1-gap); min-width: 0; min-height: 0; }
-.card.now { flex: 1 1 auto; }
+.card.now { flex: none; }
 .card { background: var(--x1-surface); border-radius: var(--ha-card-border-radius, 12px);
   border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color, #e0e0e0));
   box-shadow: var(--ha-card-box-shadow, none); padding: var(--x1-pad); min-width: 0; display: flex; flex-direction: column; }
 .wide .card { min-height: 0; overflow: hidden; }
 .narrow .card { padding: var(--x1-gap); }
 .narrow .flow { min-height: 208px; }
-.wide .flow { margin-left: calc(-1 * var(--x1-pad)); align-items: flex-end; }
+.split .flow { margin-left: calc(-1 * var(--x1-pad)); margin-right: calc(-1 * var(--x1-pad)); align-items: flex-end; }
 .wide .card.now { gap: 12px; }
 .wide.tight .card.now { gap: 8px; }
-.wide .card.now > .hero-row, .wide .card.now > .lede { margin-top: auto; }
-.wide .card.now > .flow { flex: none; margin-top: 0; min-height: 0; }
-.wide:not(.tight) .hero-row { flex-direction: column; align-items: center; gap: 12px; }
-.wide:not(.tight) .hero-txt { flex: none; width: 100%; justify-items: center; text-align: center; gap: 2px; }
-.wide:not(.tight) .hero-txt .v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.wide:not(.tight) .hero-txt .s { font-size: var(--x1-fs-title); line-height: 24px; }
-.wide:not(.tight) .lede { justify-content: center; }
+/* the drawing's card under the title bar: the drawing rooted at the card's left edge, cut there as the house runs off
+   it, with twice the chart cards' padding above and below; on a wide screen a panel on its right holds the line of
+   sources at the top, level with the top figures, and the battery's ring under it */
+.card.house { flex: none; gap: 8px; }
+.card.house > .lede { margin: 0; }
+.card.house > .flow { flex: 1 1 auto; margin-top: 0; min-height: 0; }
+.split .card.house { height: var(--x1-house, 300px); padding: 28px 14px; display: grid; grid-template-columns: minmax(0, 1fr) var(--x1-panel, clamp(236px, 33%, 296px)); grid-template-rows: auto minmax(0, 1fr); column-gap: 16px; row-gap: 8px; }
+.wide.tight .card.house { padding: 20px 10px; }
+/* the panel is a tile standing in the card's padding, as far from the card's top, right and bottom edges as the card's
+   side padding; the line of sources is its head, over a hairline, and the ring and its words fill the rest */
+.split .card.house::before { content: ""; grid-column: 2; grid-row: 1 / span 2; margin: -14px 0; background: var(--x1-tile); border: var(--ha-card-border-width, 1px) solid var(--x1-tile-line); border-radius: var(--x1-tile-r); }
+.wide.tight .card.house::before { margin: -10px 0; }
+.split .card.house > .lede { padding: 0 12px 13px; border-bottom: 1px solid var(--x1-tile-line); }
+.wide.tight .card.house > .lede { padding-bottom: 9px; }
+.split .card.house > .flow { grid-column: 1; grid-row: 1 / span 2; }
+.split .card.house > .lede { grid-column: 2; grid-row: 1; justify-self: stretch; justify-content: center; }
+.split .card.house > .hero-row { grid-column: 2; grid-row: 2; align-self: center; flex-direction: column; align-items: center; gap: 10px; margin: 0; min-width: 0; padding: 0 12px; }
+.split .card.house .hero-txt { flex: none; width: 100%; justify-items: center; text-align: center; gap: 2px; }
+.split .card.house .hero-txt .v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* a phone: the same battery tile, first, over the drawing; the line of sources its head over a hairline, the ring and
+   its words in a row under it */
+.narrow:not(.split) .card.house { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.narrow:not(.split) .card.house::before { content: ""; grid-column: 1; grid-row: 1 / span 2; background: var(--x1-tile); border: var(--ha-card-border-width, 1px) solid var(--x1-tile-line); border-radius: var(--x1-tile-r); }
+.narrow:not(.split) .card.house > .lede { grid-row: 1; grid-column: 1; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--x1-tile-line); justify-content: center; }
+.narrow:not(.split) .card.house > .hero-row { grid-row: 2; grid-column: 1; margin: 0; padding: 14px; gap: 16px; }
+.narrow:not(.split) .card.house > .flow { grid-row: 3; grid-column: 1; margin-top: 14px; }
+/* stacked, a phone reads the house and its battery first, then the place and the period's figures, the period's
+   bar over its charts, the power, the battery's charge and the period's meaning */
+.narrow .col-now, .narrow .col-period { display: contents; }
+.narrow .card.house { order: 1; }
+.narrow .card.now { order: 2; }
+.narrow .pbar { order: 3; }
+.narrow .col-period > .pbody { order: 4; }
+.narrow .pbody.pb2 { order: 5; }
+.narrow .meaning { order: 6; }
+.split .card.house > .flow { margin: 0 0 0 -14px; }
+.wide.tight .card.house > .flow { margin: 0 0 0 -10px; }
+.pbody.pb2 { flex: none; }
+.wide .pbody.pb2 { flex: none; height: var(--x1-charts, auto); min-height: 0; }
+/* the place's two cards stand level with the house card: they share its extra height two to one (two rows of tiles to
+   one), their tiles grow with it, and each tile's figure sits at its foot, its name at the top */
+.wide .col-now > .card.now { flex: 2 1 auto; }
+.wide .col-now > .card.meaning { flex: 1 1 auto; }
+.wide .col-now .card.now .heads { flex: 1 1 auto; grid-auto-rows: 1fr; }
+.wide .heads .cell.card { display: flex; flex-direction: column; }
+.wide .heads .cell .cv { margin-top: auto; }
+.wide .card.meaning .rings { flex: 1 1 auto; grid-auto-rows: 1fr; }
+.wide .card.meaning .rg { align-content: space-between; }
+/* the period's six figures in the Now column, three by two */
+.col-now .heads { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.card.now { container: now / inline-size; }
+@container now (min-width: 760px) { .col-now .card.now .heads { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.narrow .pbody.pb2 { min-height: 0; }
+/* the battery's strip in the Now column: its key over it, in a row */
+.col-now .chart { grid-template-columns: minmax(0, 1fr); row-gap: 6px; }
+.col-now .ck { flex-direction: row; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; font-size: 13px; line-height: 18px; }
+.col-now .ck .sw { width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; }
+.col-now .ck .kgp:has(.say) { flex-basis: 100%; }
+.col-now .ct { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+.col-now .ct .ck { flex: 1 1 auto; }
 .tight { --x1-gap: 10px; --x1-pad: var(--ha-space-4, 16px); }
 .tight .flow { min-height: 132px; margin-top: 6px; }
 .tight .hero-row { margin-top: 8px; }
@@ -225,8 +315,12 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .ring .track { stroke: var(--x1-grid-line); }
 .ring .arc { stroke: var(--x1-batt); transition: stroke-dasharray .6s ease; }
 .ring .res { stroke: var(--x1-axis); }
-.ring .lbl { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.hero { font-size: calc(var(--x1-ring, 148px) * .432); line-height: 1; letter-spacing: -0.02em; font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; display: flex; align-items: flex-start; }
+/* the charge alone at the ring's centre, its word under it */
+.ring .lbl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+/* the figures' visual middle sits a little above the ring's: Roboto's figures are cap height under a 1.0 line, so
+   they are lifted a hair from the line's centre */
+.ring .lbl .hero { transform: translateY(-.035em); font-weight: var(--x1-w-regular); }
+.hero { font-size: calc(var(--x1-ring, 148px) * .4); line-height: 1; letter-spacing: -0.02em; font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; display: flex; align-items: flex-start; }
 .hero.n3 { font-size: calc(var(--x1-ring, 148px) * .285); }
 .hero .u { font-size: calc(var(--x1-ring, 148px) * .162); line-height: 1; letter-spacing: 0; color: var(--x1-ink2); margin: calc(var(--x1-ring, 148px) * .04) 0 0 2px; }
 .hero-txt { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; align-content: center; }
@@ -235,9 +329,10 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .hero-txt .s { font-weight: var(--x1-w-medium); }
 .lede { display: flex; align-items: center; gap: 4px; font-size: var(--x1-fs-title); line-height: 24px; margin: 14px 0 0; min-height: 24px; }
 .lede > span { margin-left: 5px; }
-.lede .pi { width: 20px; height: 20px; flex: none; fill: currentColor; }
+.lede .pi { width: 20px; height: 20px; flex: none; fill: currentColor; stroke: currentColor; stroke-linejoin: round; stroke-linecap: round; }
 .lede .pi.solar { color: var(--x1-solar); } .lede .pi.batt { color: var(--x1-batt); } .lede .pi.grid { color: var(--x1-grid); }
-.lede .pi.solar path { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.lede .pi.solar { stroke-width: var(--x1-grade-solar); } .lede .pi.solar path { fill: none; stroke-width: calc(var(--x1-grade-solar) + 1.4px); }
+.lede .pi.grid { stroke-width: var(--x1-grade-grid); } .lede .pi.batt { stroke: none; }
 .lede.old .pi { filter: grayscale(1); opacity: .55; }
 .lede.in { animation: x1-arrive 240ms ease-out both; }
 .tight .lede { font-size: var(--x1-fs-body); line-height: 20px; min-height: 20px; margin-top: 10px; }
@@ -252,15 +347,15 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .flow .px-ink { color: var(--x1-panel-on); }
 .flow .face, .flow .cab, .flow .charge, .flow .shade, .flow .cast { stroke: none; }
 .flow .pane { stroke: color-mix(in srgb, var(--x1-surface) 55%, transparent); stroke-width: .75; stroke-linejoin: round; }
-.flow .edge { fill: none; stroke: var(--x1-ink2); stroke-opacity: .75; stroke-width: 1; stroke-linejoin: round; stroke-linecap: round; }
 .flow .hub { stroke: none; }
 .flow .cast { fill-opacity: var(--x1-cast-a); }
 /* the bottom figures stand clear of every line, over the house's shadow, so they carry no halo */
-.flow [data-n="2"], .flow [data-n="3"], .flow [data-v="2"], .flow [data-v="3"], .flow [data-s="3"] { stroke: none; }
+.flow [data-n="2"], .flow [data-n="3"], .flow [data-v="2"], .flow [data-v="3"] { stroke: none; }
+.flow .arm { stroke: none; }
+/* the pole's roundness: dark at both edges, the light off centre toward the sun */
+.flow .pl0 { stop-color: var(--x1-pole-edge); } .flow .pl1 { stop-color: var(--x1-pole-dark); } .flow .pl2 { stop-color: var(--x1-pole-top); } .flow .pl3 { stop-color: var(--x1-pole-lit); } .flow .pl4 { stop-color: var(--x1-pole-dark); }
 .flow .pole-cast { fill: none; stroke: var(--x1-cast); stroke-opacity: var(--x1-cast-a); stroke-width: 1.5; stroke-linecap: round; }
 .flow .pshade { fill: var(--x1-cast); fill-opacity: var(--x1-pshade-a); stroke: none; }
-.flow .hi { fill: none; stroke: var(--x1-hi); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
-.flow .plate-edge { fill: none; stroke: var(--x1-plate-side); stroke-width: 1; stroke-linejoin: round; }
 .flow .panel { stroke: none; }
 .flow .array { fill: none; stroke: var(--x1-frame); stroke-width: 1; stroke-linejoin: round; }
 .flow .mark { fill: none; stroke: var(--x1-ink); stroke-opacity: .55; stroke-width: 1; }
@@ -276,15 +371,19 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .flow .dots { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2.5 3.5; animation: x1-drift 3.27s linear infinite; }
 @keyframes x1-drift { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -6px; } }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
-.sw.hatch { background: repeating-linear-gradient(45deg, var(--x1-solar) 0 1.8px, transparent 1.8px 5px); }
 
 /* The period side: a title bar, six headline cards, a chart card each for power and the battery, a meaning card. */
 .pbar { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 16px; flex: none; container-type: inline-size; }
 
 .heads .cell { display: block; container-type: inline-size; }
-/* a card too narrow for its figure at the ledger's size steps the figure down one size rather than clip it */
-@container (max-width: 92px) { .heads .cell .cv { font-size: var(--x1-fs-read); line-height: 26px; } }
-@container (max-width: 78px) { .heads .cell .cv { font-size: 20px; line-height: 26px; } }
+/* the six figures are tiles inside their card, each in its own tone; a hairline only where the theme draws card borders */
+.heads .cell.card { background: var(--x1-tile); border: var(--ha-card-border-width, 1px) solid var(--x1-tile-line); border-radius: var(--x1-tile-r); box-shadow: none; }
+/* a card too narrow for its figure at the ledger's size steps the figure down rather than clip it; the steps are
+   measured on the widest figure ("29.8 kWh": its unit 28 px, its number about two ems) */
+@container (max-width: 84px) { .heads .cell.card .cv { font-size: var(--x1-fs-read); line-height: 26px; } }
+@container (max-width: 76px) { .heads .cell.card .cv { font-size: 20px; line-height: 26px; } }
+@container (max-width: 68px) { .heads .cell.card .cv { font-size: 18px; line-height: 26px; } }
+@container (max-width: 64px) { .heads .cell.card .cv { font-size: 16px; line-height: 26px; } }
 /* six cards sharing less than 700 px give their figures the room of a tighter margin */
 .heads { container-type: inline-size; }
 @container (max-width: 700px) { .heads .cell.card { padding-left: 9px; padding-right: 9px; } }
@@ -301,7 +400,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .tbtn { min-height: 28px; padding: 5px 10px; border: 1px solid var(--x1-grid-line); border-radius: 6px; }
 .pbar .pvs { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pbar .pvs.reading { color: var(--x1-ink); font-weight: var(--x1-w-medium); }
-@container (max-width: 560px) { .col-period .pbar .pvs { flex: 1 0 100%; order: 3; } .col-period .pbar .head-r { order: 4; } }
+@container (max-width: 560px) { .col-period .pbar .pvs { flex: 1 0 100%; order: 3; } .col-period .pbar .head-r { order: 4; flex: 1 0 100%; margin-left: 0; justify-content: space-between; } }
 .nav button:hover, .seg button:hover, .tbtn:hover { color: var(--x1-ink); }
 .nav button:focus-visible, .seg button:focus-visible, .tbtn:focus-visible { outline: 2px solid var(--primary-color, #2a78d6); outline-offset: 2px; }
 .heads { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--x1-gap); flex: none; }
@@ -317,8 +416,8 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .pbody { position: relative; flex: 1 1 auto; min-height: 0; }
 .narrow .pbody { min-height: 320px; }
 .mg { display: flex; flex-direction: column; gap: var(--x1-gap); position: relative; outline: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.chart { display: grid; grid-template-columns: var(--x1-tile, 168px) minmax(0, 1fr); column-gap: 14px; align-items: start; }
-.narrow .chart { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+/* a chart card: its name and key in a head row, the plot the card's full width under it */
+.chart { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 8px; align-items: start; }
 .ct { min-width: 0; }
 .ct .ctn { font-size: var(--x1-fs-body); line-height: 20px; font-weight: var(--x1-w-medium); }
 .ct .ctv { font-size: var(--x1-fs-read); line-height: 28px; font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -326,20 +425,29 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .ct .ctd { font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); margin-top: 2px; text-wrap: pretty; }
 .tight .ctd { display: none; }
 .tick.on { fill: var(--x1-ink); font-weight: var(--x1-w-medium); }
+/* a band's name in the ink that reads on its band (white on the grid's violet, and on its tint in the dark), haloed in
+   the band's own colour so it stays legible where it overhangs the plot, never ringed in the surface's colour */
+.tick.band { paint-order: stroke; stroke-width: 3px; stroke-linejoin: round; fill: #1b1b1b; font-weight: var(--x1-w-medium); }
+.tick.band.bGh, :host(.dark) .tick.band.bGb { fill: #ffffff; }
 .soc-fill { fill: var(--x1-batt); fill-opacity: .16; }
 :host(.dark) .soc-fill { fill-opacity: .24; }
-.ck { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: var(--x1-fs-small); line-height: 18px; color: var(--x1-ink2); }
+.ck { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: var(--x1-fs-body); line-height: 20px; color: var(--x1-ink2); }
 .narrow .ck { flex-direction: row; flex-wrap: wrap; gap: 4px 20px; }
 .kgp { display: grid; gap: 0; }
 .ck .kt { font-weight: var(--x1-w-medium); color: var(--x1-ink); line-height: 16px; }
 .ck .kg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ck .kg.say { font-size: var(--x1-fs-small); line-height: 18px; }
+.tight .ck { font-size: 13px; line-height: 18px; gap: 2px; margin-top: 4px; }
+.tight .ck .sw { width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; }
 .ck .kg b { font-weight: var(--x1-w-medium); color: var(--x1-ink); }
-.ck .sw { width: 11px; height: 11px; margin: 0 4px 0 0; border: 1px solid color-mix(in srgb, var(--x1-ink) 12%, transparent); vertical-align: -1px; }
+.ck .sw { width: 14px; height: 14px; border-radius: 3px; margin: 0 8px 0 0; border: 1px solid color-mix(in srgb, var(--x1-ink) 12%, transparent); vertical-align: -2px; }
 .ck .sw + .sw, .ck span + .sw { margin-left: 6px; }
-.ck .sw.line { height: 0; border: 0; border-top: 2px dashed var(--x1-ink2); vertical-align: 2px; }
-.ck .sw.dot { border-radius: 50%; background: var(--x1-batt); border: 0; width: 8px; height: 8px; margin-right: 6px; }
-.ck .sw.fill { background: color-mix(in srgb, var(--x1-batt) 24%, var(--x1-surface)); border: 0; border-top: 2.5px solid var(--x1-batt); border-radius: 1px; }
+.ck .sw.line { height: 0; border: 0; border-radius: 0; border-top: 2px dashed var(--x1-ink2); vertical-align: 4px; }
+.ck .sw.dot { border-radius: 50%; background: var(--x1-batt); border: 0; width: 10px; height: 10px; margin-right: 8px; }
+.ck .sw.fill { background: color-mix(in srgb, var(--x1-batt) 24%, var(--x1-surface)); border: 0; border-top: 3px solid var(--x1-batt); border-radius: 2px; }
 .narrow .ck { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.col-period .ct { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 24px; }
+.col-period .ck { flex-direction: row; flex-wrap: wrap; gap: 4px 18px; margin: 0; }
 .cs { min-width: 0; }
 .mg:focus-visible { outline: 2px solid var(--primary-color, #2a78d6); outline-offset: 4px; border-radius: 4px; }
 .mg-p, .mg-axis { touch-action: pan-y; }
@@ -353,21 +461,25 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .tick.hint { fill: var(--x1-ink2); }
 .sname { font-size: var(--x1-fs-small); fill: var(--x1-ink2); font-weight: var(--x1-w-medium); }
 .meaning { flex: none; padding: 12px var(--x1-pad); }
-.rings { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px 16px; min-height: 60px; }
-.rg { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.rg svg { flex: none; width: 44px; height: 44px; display: block; }
+/* the period's meaning in the Now column: three figures, each a tile with its name over it as the place's six have, in
+   the same three columns and tone; the detail is the tooltip */
+.rings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.rg { display: grid; gap: 2px; min-width: 0; align-content: start; padding: 10px 9px; container-type: inline-size;
+  background: var(--x1-tile); border: var(--ha-card-border-width, 1px) solid var(--x1-tile-line); border-radius: var(--x1-tile-r); }
+.tight .rg { padding: 8px; }
+.tight .meaning { padding-top: 10px; padding-bottom: 10px; } .tight .foot { margin-top: 8px; }
+.rg .rtop { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rg svg { flex: none; width: 24px; height: 24px; display: block; }
 .rg .track { stroke: var(--x1-grid-line); }
-.rg .rt { min-width: 0; display: grid; }
-.rg.fig { padding-left: 2px; }
-.rg .rv { font-size: var(--x1-fs-read); line-height: 26px; font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.rg .rn { font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.foot { margin-top: 10px; font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 12px; }
-.foot span { white-space: nowrap; }
-.foot .fr { margin-left: auto; }
+.rg .rv { font-size: var(--x1-fs-read); line-height: 28px; font-weight: var(--x1-w-medium); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* a name wraps at its hyphen before it clips, in the narrowest column; a figure steps down as the place's do */
+.rg .rn { font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); }
+@container (max-width: 76px) { .rg .rv { font-size: 20px; } .rg svg { width: 20px; height: 20px; } }
+@container (max-width: 64px) { .rg .rv { font-size: 18px; } }
+.foot { margin-top: 10px; min-height: 34px; font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); display: grid; gap: 2px; }
+.foot span:empty { display: none; }
 .narrow .foot { flex-wrap: wrap; }
-.narrow .rings { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.narrow .rg { gap: 12px; }
-.narrow .rg .rt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+
 
 /* Motion: crossfades for a change of view; figures crossfade in place; all off under reduced motion. */
 .mg-ghost { position: absolute; inset: 0; overflow: hidden; pointer-events: none; animation: x1-fade 220ms ease-out both; }
@@ -566,30 +678,6 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (more.length) s += `, ${more.join(" and ")}`;
       return s + ".";
     }
-    // The battery's answer: when it fills or empties, or what it is holding. It returns the words and a note for the
-    // tooltip; nothing it says repeats the ring's word or the line about the reserve.
-    _stateLine(L) {
-      const f = L.f, AT_RATE = "At the present charging rate", AT_LOAD = "At the present load, down to the reserve";
-      if (L.soc !== null && L.soc >= 99.5) return ["Full", ""];
-      if (L.chg > 0.05) {
-        if (L.toFull === null) return ["Charging", ""];
-        const at = L.now + L.toFull * HOUR;
-        return at < f.midnight(f.addDays(f.dateStr(L.now), 1)) ? [`Full by ${f.time(at)}`, AT_RATE] : ["Not full today", AT_RATE];
-      }
-      const low = L.soc !== null && (L.soc < L.reserve - 0.5 || (L.usable !== null && L.usable < 0.05));
-      if (L.dis > 0.05) {
-        if (low) return ["Drawing on the reserve", ""];
-        if (L.hours === null) return ["Discharging", ""];
-        // within a day a clock time names its next occurrence, so it needs no "tomorrow"
-        return L.hours < 23 ? [`Lasts until ${f.time(L.now + L.hours * HOUR)}`, AT_LOAD] : ["Lasts over a day", AT_LOAD];
-      }
-      if (low) return ["Kept for outages", "What is left below the reserve is held for an outage"];
-      if (L.usable !== null && L.home > 0.05) { const h = L.usable / L.home; return [h < 23 ? `Would last ${f.dur(h * HOUR)}` : "Would last over a day", "If it ran the house at its present load, down to the reserve"]; }
-      return ["Idle", ""];
-    }
-
-    /* ----- the cloud: statistics through the integration's raw-request action ----- */
-
     async _siteId() {
       if (this._config.site) return this._config.site;
       if (this._site) return this._site;
@@ -842,43 +930,77 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     _mount() {
       this._mountShell();
       this._mounted = true;
-      this._renderAll();
       this._ro = this._ro ?? new ResizeObserver(() => { clearTimeout(this._rz); this._rz = setTimeout(() => this._layout(), 80); });
+      this._renderAll();
       this._ro.observe(this);
     }
     _mode() {
       const w = this.clientWidth || window.innerWidth;
       return w >= 1000 ? "wide" : "narrow";
     }
+    // Three tiers by the card's own width: wide (two columns), a tablet (600 px up: one column in the phone's order,
+    // each card as on the desktop, the house beside its battery tile) and a phone (the tile over the drawing)
+    _tier() {
+      const w = this.clientWidth || window.innerWidth, mode = this._mode();
+      return { mode, tablet: mode === "narrow" && w >= 600 };
+    }
+    _cls(mode, tablet, tight) { return `wrap ${mode}${mode === "wide" || tablet ? " split" : ""}${tablet ? " tablet" : ""}${tight ? " tight" : ""}`; }
     _layout() {
       if (!this._body || !this._mounted) return;
       const mode = this._mode();
       const top = this.getBoundingClientRect().top + window.scrollY;
       const h = Math.max(520, window.innerHeight - top);
-      const tight = mode === "wide" && h < 700;
-      const cls = `wrap ${mode}${tight ? " tight" : ""}`;
-      this._tight = tight;
+      const tight = mode === "wide" && h < 700, { tablet } = this._tier();
+      const cls = this._cls(mode, tablet, tight);
+      this._tight = tight; this._tablet = tablet;
       if (this._body.className !== cls) this._body.className = cls;
       this._body.style.setProperty("--x1-h", mode === "wide" ? `${h}px` : "auto");
-      if (mode !== this._lastMode || tight !== this._lastTight) { this._lastMode = mode; this._lastTight = tight; this._renderAll(); return; }
+      if (mode !== this._lastMode || tight !== this._lastTight || tablet !== this._lastTablet) { this._lastMode = mode; this._lastTight = tight; this._lastTablet = tablet; this._renderAll(); return; }
       this._frame(mode, h);
       this._drawFlow(); this._drawChart();
     }
 
-    // The battery's ring grows with the window's height in the wide layout, where the Now column is one card cut to
-    // the window and stands alone above its facts when the card is tall; beside them when it is short. A stacked
-    // screen scrolls, so its ring keeps one size.
-    _ringSize(mode, h, w = 0) {
-      if (mode !== "wide") return 148;
-      if (h < 700) return Math.round(clamp(h * 0.235, 124, 160));
-      return Math.round(Math.min(clamp(h * 0.28, 160, 240), w > 0 ? 0.72 * w : Infinity));
-    }
-    // The ring's size is set once the Now card's width is known: a stacked ring takes at most 72% of it.
+    // The drawing's card takes a little over half of the period column under its title bar, and the battery's ring,
+    // in the card's right-hand panel under the line of sources, is sized to what the panel's height leaves after its
+    // words. A stacked screen scrolls, so its ring keeps one size.
     _frame(mode, h) {
-      const card = this._body.querySelector(".card.now"), cs = card ? getComputedStyle(card) : null;
-      const w = card ? card.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : 0;
-      const ring = `${this._ringSize(mode, h, w)}px`;
+      const col = this._body.querySelector(".col-period"), pbar = col?.querySelector(".pbar"), houseEl = col?.querySelector(".card.house");
+      let house = "", ring = this._tablet || mode === "wide" ? "148px" : "116px", panel = "";
+      if (((mode === "wide" && col && pbar) || this._tablet) && houseEl) {
+        // The battery's tile takes a third of the house card's width and the drawing the rest: the card is as tall as it
+        // takes for the drawing (sized by its height) to fill its two thirds. On the desktop that height comes out of
+        // the charts' row, which keeps at least a third of the column (240 px; 190 when tight), and the place's two cards beside it grow to end
+        // level with it, so the two charts still begin on one line and are one height; a card capped short of that
+        // gives the tile what the drawing cannot use, so no empty band opens between the pole and the tile.
+        const cs = getComputedStyle(houseEl), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+        const innerW = houseEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), bleed = parseFloat(cs.paddingLeft);
+        const third = Math.max(236, Math.round(innerW / 3)), drawCol = innerW - third - 16 + bleed;
+        const want = (7.2 * drawCol) / FLOW.SPAN + 56 + FLOW.TOP + padY;
+        let hh, charts = "";
+        if (mode === "wide") {
+          const gap = parseFloat(getComputedStyle(col).rowGap) || 16, colH = col.clientHeight, pb = pbar.offsetHeight;
+          // the place's two cards at their own height (they stretch to the row's line once it is set)
+          const natural = (el) => { if (!el) return 0; const f0 = el.style.flex; el.style.flex = "none"; const v = el.offsetHeight; el.style.flex = f0; return v; };
+          const now = this._body.querySelector(".card.now"), mean = this._body.querySelector(".card.meaning");
+          const level = now && mean ? natural(now) + gap + natural(mean) - pb - gap : 0;
+          // the charts' row keeps enough height for the power chart to carry a scale on both sides of its line
+          const cap = colH - Math.max(this._tight ? 190 : 240, colH * 0.32) - gap - pb - gap;
+          hh = Math.round(Math.max(level, Math.min(want, cap), 240));
+          charts = `${Math.max(0, Math.round(colH - pb - gap - hh - gap))}px`;
+        } else hh = Math.round(clamp(want, 300, 460));
+        const inner = hh - padY;
+        const drawW = FLOW.SPAN * ((inner - 56 - FLOW.TOP) / 7.2);
+        const colW = Math.round(clamp(innerW - 16 - (drawW - bleed) - 12, third, innerW * 0.5));
+        // the panel's tile: its head (the line of sources, its padding and hairline), a row gap, the ring, its two lines
+        // of words; and no wider than the tile's column less its padding
+        const head = (this._tight ? 20 + 9 : 24 + 13) + 1;
+        house = `${hh}px`; panel = `${colW}px`;
+        ring = `${Math.round(clamp(Math.min(inner - head - 8 - 42 - 10 - 12, colW - 24 - 24), 96, 220))}px`;
+        if (this._body.style.getPropertyValue("--x1-charts") !== charts) { if (charts) this._body.style.setProperty("--x1-charts", charts); else this._body.style.removeProperty("--x1-charts"); }
+      } else this._body.style.removeProperty("--x1-charts");
       if (this._body.style.getPropertyValue("--x1-ring") !== ring) this._body.style.setProperty("--x1-ring", ring);
+      if (this._body.style.getPropertyValue("--x1-house") !== house) { if (house) this._body.style.setProperty("--x1-house", house); else this._body.style.removeProperty("--x1-house"); }
+      if (this._body.style.getPropertyValue("--x1-panel") !== panel) { if (panel) this._body.style.setProperty("--x1-panel", panel); else this._body.style.removeProperty("--x1-panel"); }
     }
 
     _renderAll(fade = false) {
@@ -886,11 +1008,16 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const mode = this._mode();
       const top = this.getBoundingClientRect().top + window.scrollY;
       const h = Math.max(520, window.innerHeight - top);
-      this._tight = mode === "wide" && h < 700;
-      this._lastMode = mode; this._lastTight = this._tight;
-      this._body.className = `wrap ${mode}${this._tight ? " tight" : ""}`;
+      this._tight = mode === "wide" && h < 700; this._tablet = this._tier().tablet;
+      this._lastMode = mode; this._lastTight = this._tight; this._lastTablet = this._tablet;
+      this._body.className = this._cls(mode, this._tablet, this._tight);
       this._body.style.setProperty("--x1-h", mode === "wide" ? `${h}px` : "auto");
       this._body.innerHTML = this._nowCol() + this._periodCol();
+      this._renderRings();
+      // the two cards over the battery's chart set where the charts' row begins, so a change in their height re-levels it
+      for (const el of this._roCards ?? []) this._ro?.unobserve(el);
+      this._roCards = [...this._body.querySelectorAll(".card.now, .card.meaning")];
+      for (const el of this._roCards) this._ro?.observe(el);
       this._frame(mode, h);
       this._applyLive();
       this._loadPeriod(fade);
@@ -902,17 +1029,10 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const name = this._config.name || "Home";
       return `<section class="col-now"><section class="card now">
         <div class="head"><h2>${esc(name)}</h2><span class="meta" data-k="mode"></span><span class="lamp" data-k="lamp"><i></i><span data-k="lamp-t"></span></span></div>
-        <div class="hero-row">
-          <div class="ring" data-ring></div>
-          <div class="hero-txt">
-            <div class="k">Battery</div>
-            <div class="v s" data-k="h3"></div>
-            <div class="v" data-k="h2"></div>
-            <div class="k" data-k="h1"></div>
-          </div>
-        </div>
-        <div class="lede" data-k="lede" role="img"></div>
-        <div class="flow" data-flow></div></section></section>`;
+        <div class="heads" data-ledger>${["Solar", "House", "Bought", "Sold", "Charged", "Discharged"].map((n) => `<div class="cell card"><div class="cn">${n}</div><div class="cv">—</div><div class="cd"></div></div>`).join("")}</div></section>
+        <section class="card meaning"><div class="rings" data-rings></div>
+        <div class="foot"><span data-k="foot">Anker cloud statistics</span><span class="fr" data-k="footr"></span></div></section>
+        <div class="pbody pb2" data-mg2></div></section>`;
     }
 
     _applyLive() {
@@ -932,9 +1052,6 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       set("h1", L.cap ? `${f.num(L.cap, 0)}${NB}kWh in ${L.packs ?? "—"} packs` : `${L.packs ?? "—"} packs`);
       const resWord = `${f.num(L.reserve)}%${NB}reserve`;
       set("h2", L.soc === null || !L.cap ? resWord : L.soc < L.reserve - 0.5 ? `${f.num(((L.reserve - L.soc) / 100) * L.cap, 1)}${NB}kWh below the ${resWord}` : L.usable < 0.05 ? `At the ${resWord}` : `${f.num(L.usable, 1)}${NB}kWh above the ${resWord}`);
-      const [stWords, stNote] = this._stateLine(L);
-      set("h3", stWords);
-      const h3 = this._root.querySelector('[data-k="h3"]'); if (h3 && (h3.title || "") !== stNote) h3.title = stNote;
       this._drawPowered(L);
       this._drawFlow();
     }
@@ -971,7 +1088,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
           <circle class="res" data-res cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="13" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 ${c} ${c})"/>
           <circle class="arc" data-arc cx="${c}" cy="${c}" r="${r}" fill="none" stroke-width="13" stroke-linecap="butt" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90 ${c} ${c})"/>
           <line data-resmark x1="${c}" y1="${c - r - 9}" x2="${c}" y2="${c - r + 9}" stroke="var(--x1-ink)" stroke-width="2"/></svg>
-          <div class="lbl"><div class="hero"><span data-k="soc">—</span><span class="u">%</span></div><div class="small" data-k="socl"></div></div>`;
+          <div class="lbl"><div class="hero"><span data-k="soc">—</span></div></div>`;
       }
       host.querySelector("[data-arc]").setAttribute("stroke-dasharray", soc >= 99.95 ? "none" : `${soc} 100`);
       host.querySelector("[data-res]").setAttribute("stroke-dasharray", `${res} 100`);
@@ -980,9 +1097,8 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const socTxt = L.soc === null ? "—" : L.f.num(L.soc);
       this._swapText(el, socTxt);
       el.parentElement.classList.toggle("n3", socTxt.length >= 3);
-      const lbl = host.querySelector('[data-k="socl"]'), svgEl = host.querySelector("svg");
+      const svgEl = host.querySelector("svg");
       const txt = L.chg > 0.05 ? "charging" : L.dis > 0.05 ? "discharging" : "idle";
-      if (lbl.textContent !== txt) lbl.textContent = txt;
       const say = L.soc === null ? "Battery state of charge unknown" : `Battery ${L.f.num(L.soc)}%, ${txt}, reserve ${L.f.num(res)}%`;
       if (svgEl && svgEl.getAttribute("aria-label") !== say) svgEl.setAttribute("aria-label", say);
     }
@@ -999,32 +1115,61 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (!host || !L) return;
       // The frame is pushed in on the junction: it runs from just past the panels' far corner on the left to the pole's
       // crossarm on the right, measured in k (0.707 of a metre across), with a band over the drawing for the top figures.
-      const D = 8.6, LN = 12, HT = 3, R = 2.4, e = 0.5, poleB = D + 1.5, poleTop = 4.1, td = 0.375;
-      const cols = 4, rows = 2, cw = 1.4, aa0 = 0.35, aa1 = aa0 + cols * cw, pb0 = 0.6, pb1 = D / 2 - 0.55;
-      const UL = -0.707 * (aa1 - pb0) - 0.25, UR = 0.707 * (poleB + 0.65) + 0.1, SPAN = UR - UL, TOP = 10;
-      // the figures' columns: Solar's crosses the panels, Grid's is the pole, House's is the wall box (placed half the
-      // Solar-to-Grid step left of Solar) and Battery's is the root tower, the rightmost
-      const cS = 1.25, cG = 0.707 * poleB, cH = cS - (cG - cS) / 2;
+      // the house, the array and the frame (FLOW); the service pole: in the gable's plane just past the roof's overhang, so
+      // the grid's line runs straight along the gable into it and the roof's edge passes in front of it; its height is
+      // set below, to the top of the figures' band
+      const { D, LN, HT, R, e, td, poleA, poleB0, poleR, arm1, arm2, cols, rows, cw, aa0, aa1, pb0, pb1, UL, UR, SPAN, TOP } = FLOW;
+      // the figures' columns: Solar's crosses the panels, House's is the wall box and Battery's is the root tower, the
+      // rightmost; Grid shares Battery's, set over it in the top row beside the pole, with no lead
+      const cS = 1.25, cH = -1.695;
       const W = Math.max(240, host.clientWidth), natural = Math.round((7.2 * W) / SPAN + 56 + TOP);
       let room = host.clientHeight || natural;
-      if (this._mode() === "wide") {
-        // the card is cut to the window: the drawing takes what the header, the battery, the sentence and the gaps
-        // leave, up to the height its width allows; any height left over is split above the battery and the sentence
-        const card = host.parentElement, cs = getComputedStyle(card), kids = [...card.children].filter((c) => c !== host);
-        room = card.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - (parseFloat(cs.rowGap) || 0) * kids.length - kids.reduce((a, c) => a + c.getBoundingClientRect().height, 0);
+      if (this._mode() === "wide" || this._tablet) {
+        // the drawing's card is cut to its share of the period column; the drawing has the card's height inside its
+        // padding, the line of sources and the ring standing in the panel beside it
+        const card = host.parentElement, cs = getComputedStyle(card);
+        room = card.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
       }
       // stacked, the page scrolls, so the drawing takes the height its width gives it, up to 300 px
-      const H = Math.max(150, this._mode() === "wide" ? Math.min(natural, room) : Math.min(natural, 300));
+      const H = Math.max(150, this._mode() === "wide" || this._tablet ? Math.min(natural, room) : Math.min(natural, 300));
       const f = L.f;
       // one unit is a metre of house; the axes carry the projection's foreshortening (0.74 along the ground, 0.95 up)
       const k = Math.min(W / SPAN, (H - 56 - TOP) / 7.2);
       const a = [-0.707 * k, -0.216 * k], b = [0.707 * k, -0.216 * k], up = 0.952 * k;
-      const O = [(W - SPAN * k) / 2 - UL * k, H - 30];
+      // The drawing is rooted at the frame's left edge, cut where it always is (just past the panels' far corner), so
+      // the house runs off the left as it did in the Now column; a frame wider than that leaves its room on the right.
+      const O = [-UL * k, H - 30];
       const P = (la, lb, lw) => [O[0] + la * a[0] + lb * b[0], O[1] + la * a[1] + lb * b[1] - lw * up];
+      // the pole stands two pixels left of where the frame was measured, so the figures keep their places
+      const poleB = poleB0 - 2 / (0.707 * k), poleTop = (P(poleA, poleB, 0)[1] - 2 - 0.305 * poleR * k) / up;
       const pt = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
       const poly = (ps, cls, fill) => `<polygon points="${ps.map(pt).join(" ")}" class="${cls}" fill="${fill}"/>`;
       const zE = HT - 0.15, zR = HT + R, roofZ = (lb) => zE + ((lb + e) / (D / 2 + e)) * (zR - zE);
       let g = "";
+      // The house is lit, never outlined. A gradient runs through each plane with its bands parallel to the screen
+      // direction u (an edge of the plane), from the band through p0 to the band through p1; without u it runs straight
+      // from p0 to p1. Stops are tokens, so each theme keys the same light high or low.
+      const fx = (v) => v.toFixed(1);
+      const band = (id, p0, p1, u, stops) => {
+        let x2 = p1[0], y2 = p1[1];
+        if (u) { const ul = Math.hypot(u[0], u[1]) || 1, ux = u[0] / ul, uy = u[1] / ul, dot = (p1[0] - p0[0]) * ux + (p1[1] - p0[1]) * uy; x2 -= dot * ux; y2 -= dot * uy; }
+        const st = stops.map(([o, c, op]) => `<stop offset="${o}" style="stop-color:var(${c})${op === undefined ? "" : `;stop-opacity:${op}`}"/>`).join("");
+        return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${fx(p0[0])}" y1="${fx(p0[1])}" x2="${fx(x2)}" y2="${fx(y2)}">${st}</linearGradient>`;
+      };
+      // a plane laid under its neighbours bleeds a hair under their edges, so no seam of the card shows where two meet
+      const face = (ps, id) => `<polygon points="${ps.map(pt).join(" ")}" class="face" fill="url(#${id})" style="stroke:url(#${id});stroke-width:.8px;stroke-linejoin:round"/>`;
+      g += `<defs>${[
+        // the long wall: darkest under the eave, lightest a little above its foot, occluded where it meets the ground
+        band("x1-gw", P(0, 0, HT), P(0, 0, 0), a, [[0, "--x1-wall-lo"], [0.32, "--x1-wall"], [0.84, "--x1-wall-hi"], [1, "--x1-wall-foot"]]),
+        // the gable: in shade under the rake and at the house's corner, lighter toward its far foot
+        band("x1-gg", P(0, 0, zE + 0.5), P(0, D, 0.2), null, [[0, "--x1-gable-lo"], [0.5, "--x1-gable"], [1, "--x1-gable-hi"]]),
+        // the front slope: the ridge catching the sun, falling off toward the eave
+        band("x1-gr", P(0, D / 2, zR), P(0, -e, zE), a, [[0, "--x1-roof-hi"], [0.22, "--x1-roof"], [1, "--x1-roof-lo"]]),
+        // the house's shadow, darkest at the long wall's foot and softening as it falls away; the feet's contact shade
+        band("x1-gc", P(0, 0, 0), P(0, -1.6, 0), a, [[0, "--x1-cast", 1], [0.55, "--x1-cast", 0.45], [1, "--x1-cast", 0.08]]),
+        band("x1-gf", P(0, 0, 0), P(0, -0.5, 0), a, [[0, "--x1-cast", 1], [1, "--x1-cast", 0]]),
+        band("x1-gh", P(0, 0, 0), P(-0.5, 0, 0), b, [[0, "--x1-cast", 1], [1, "--x1-cast", 0]]),
+      ].join("")}<linearGradient id="x1-gk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--x1-cab-lit)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--x1-cab-lit) 78%, #000)"/></linearGradient><linearGradient id="x1-gq" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--x1-batt)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--x1-batt) 82%, #000)"/></linearGradient><linearGradient id="x1-gp" x1="1" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--x1-panel-sheen)"/><stop offset=".45" style="stop-color:var(--x1-panel-off)"/><stop offset="1" style="stop-color:var(--x1-panel-deep)"/></linearGradient></defs>`;
       // The sun stands high, 20° from overhead, at the upper right and a little behind the house: the roof takes the
       // most light, the gable less and the long wall least, and every shadow falls short toward the lower left. The
       // house's lies on the ground along the feet of the long wall and the gable, the shape of the whole house (walls,
@@ -1039,15 +1184,16 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         return lo.slice(0, -1).concat(hi.slice(0, -1));
       };
       const solid = [[0, 0, 0], [LN, 0, 0], [LN, D, 0], [0, D, 0], [-e, -e, zE], [LN + e, -e, zE], [LN + e, D + e, zE], [-e, D + e, zE], [-e, D / 2, zR], [LN + e, D / 2, zR]];
-      g += poly(hull(solid.map(([la, lb, z]) => cast(la, lb, z))).map(([la, lb]) => P(la, lb, 0)), "cast", "var(--x1-cast)");
+      g += poly(hull(solid.map(([la, lb, z]) => cast(la, lb, z))).map(([la, lb]) => P(la, lb, 0)), "cast", "url(#x1-gc)");
       // the pole's shadow: a thin line along the light's fall, with its crossarms
-      const pc = (lb, z) => P(...cast(0, lb, z), 0);
-      g += `<path class="pole-cast" d="M${pt(P(0, poleB, 0))}L${pt(pc(poleB, poleTop))}M${pt(pc(poleB - 0.65, poleTop - 0.3))}L${pt(pc(poleB + 0.65, poleTop - 0.3))}M${pt(pc(poleB - 0.45, poleTop - 0.7))}L${pt(pc(poleB + 0.45, poleTop - 0.7))}"/>`;
-      // a thin shadow on the ground along both walls' feet; the two walls, the back slope seen over the ridge, the
-      // front slope, the roof's thickness at its edges
-      g += poly([P(LN, 0, 0), P(0, 0, 0), P(0, D, 0), P(-0.3, D, 0), P(-0.3, -0.3, 0), P(LN, -0.3, 0)], "shade", "var(--x1-shadow)");
-      g += poly([P(0, 0, 0), P(LN, 0, 0), P(LN, 0, HT), P(0, 0, HT)], "face", "var(--x1-wall)");
-      g += poly([P(0, 0, 0), P(0, D, 0), P(0, D, HT), P(0, D / 2, zR), P(0, 0, HT)], "face", "var(--x1-gable)");
+      const pc = (lb, z) => P(...cast(poleA, lb, z), 0);
+      g += `<path class="pole-cast" d="M${pt(P(poleA, poleB, 0))}L${pt(pc(poleB, poleTop))}M${pt(P(...cast(poleA - arm1, poleB, poleTop - 0.35), 0))}L${pt(P(...cast(poleA + arm1, poleB, poleTop - 0.35), 0))}M${pt(P(...cast(poleA - arm2, poleB, poleTop - 0.9), 0))}L${pt(P(...cast(poleA + arm2, poleB, poleTop - 0.9), 0))}"/>`;
+      // where both walls meet the ground, a contact shade fading out from the foot, mitred at the corner; the two walls,
+      // the back slope seen over the ridge, the front slope, the roof's thickness at its edges
+      g += poly([P(LN, 0, 0), P(0, 0, 0), P(-0.5, -0.5, 0), P(LN, -0.5, 0)], "cast", "url(#x1-gf)");
+      g += poly([P(0, 0, 0), P(0, D, 0), P(-0.5, D, 0), P(-0.5, -0.5, 0)], "cast", "url(#x1-gh)");
+      g += face([P(0, 0, 0), P(LN, 0, 0), P(LN, 0, HT), P(0, 0, HT)], "x1-gw");
+      g += face([P(0, 0, 0), P(0, D, 0), P(0, D, HT), P(0, D / 2, zR), P(0, 0, HT)], "x1-gg");
       // the house's end of the circuit: a plain box on the long wall in the wall's colour, half as deep as a battery
       // tower, centred on House's column; the house's line ends in it
       const od = td / 2, laH = -cH / 0.707 - od, oa0 = laH - 1.3, oa1 = laH + 1.3, oz0 = 0.8, oz1 = 2.2, sh = 0.14;
@@ -1055,13 +1201,28 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       g += poly([P(oa0, -od, oz0), P(oa1, -od, oz0), P(oa1, -od, oz1), P(oa0, -od, oz1)], "face", "var(--x1-box)");
       g += poly([P(oa0, -od, oz1), P(oa1, -od, oz1), P(oa1, 0, oz1), P(oa0, 0, oz1)], "face", "var(--x1-box-top)");
       g += poly([P(oa0, -od, oz0), P(oa0, 0, oz0), P(oa0, 0, oz1), P(oa0, -od, oz1)], "face", "var(--x1-gable)");
+      // The service pole stands just past the roof, behind its edge, and rises to the top of the figures' band, where it
+      // is Grid's pointer. It is a cylinder: a gradient across its width runs from the shaded side through the light,
+      // which comes from the upper right, to a narrow falloff at its far edge, under a lighter cap; its two crossarms
+      // are beams laid across the line, each showing its top, its long side and its end, the half behind the pole drawn
+      // before it and the half in front after. It is toned from the house's own palette, so it recedes into the card.
+      {
+        const a = poleA, pb = poleB, base = P(a, pb, 0), top = P(a, pb, poleTop), rw = poleR * k, ry = 0.305 * poleR * k, f1 = (v) => v.toFixed(1);
+        g += `<defs><linearGradient id="x1-pole" x1="0" x2="1" y1="0" y2="0"><stop offset="0" class="pl0"/><stop offset=".28" class="pl1"/><stop offset=".62" class="pl2"/><stop offset=".86" class="pl3"/><stop offset="1" class="pl4"/></linearGradient></defs>`;
+        const beam = (a0, a1, z0, z1, w) => poly([P(a0, pb - w, z1), P(a1, pb - w, z1), P(a1, pb + w, z1), P(a0, pb + w, z1)], "arm", "var(--x1-pole-top)")
+          + poly([P(a0, pb - w, z0), P(a1, pb - w, z0), P(a1, pb - w, z1), P(a0, pb - w, z1)], "arm", "var(--x1-pole-dark)")
+          + poly([P(a0, pb - w, z0), P(a0, pb + w, z0), P(a0, pb + w, z1), P(a0, pb - w, z1)], "arm", "var(--x1-pole-lit)");
+        const arms = [[arm1, poleTop - 0.35], [arm2, poleTop - 0.9]], th = 0.16, w = 0.08;
+        for (const [L, zt] of arms) g += beam(a + poleR, a + L, zt - th, zt, w);
+        g += `<path class="arm" fill="url(#x1-pole)" d="M${f1(base[0] - rw)},${f1(base[1])}L${f1(top[0] - rw)},${f1(top[1])}A${f1(rw)},${f1(ry)} 0 0 1 ${f1(top[0] + rw)},${f1(top[1])}L${f1(base[0] + rw)},${f1(base[1])}A${f1(rw)},${f1(ry)} 0 0 1 ${f1(base[0] - rw)},${f1(base[1])}Z"/>`;
+        g += `<ellipse class="arm" cx="${f1(top[0])}" cy="${f1(top[1])}" rx="${f1(rw)}" ry="${f1(ry)}" fill="var(--x1-pole-top)"/>`;
+        for (const [L, zt] of arms) g += beam(a - L, a - poleR, zt - th, zt, w);
+      }
       g += poly([P(-e, D / 2, zR), P(LN + e, D / 2, zR), P(LN + e, D + e, zE), P(-e, D + e, zE)], "face", "var(--x1-roof-back)");
-      g += poly([P(-e, -e, zE), P(LN + e, -e, zE), P(LN + e, D / 2, zR), P(-e, D / 2, zR)], "face", "var(--x1-roof)");
+      g += face([P(-e, -e, zE), P(LN + e, -e, zE), P(LN + e, D / 2, zR), P(-e, D / 2, zR)], "x1-gr");
       const t = 0.18;
       g += poly([P(-e, -e, zE), P(-e, D / 2, zR), P(-e, D + e, zE), P(-e, D + e, zE - t), P(-e, D / 2, zR - t), P(-e, -e, zE - t)], "face", "var(--x1-trim-g)");
       g += poly([P(-e, -e, zE), P(LN + e, -e, zE), P(LN + e, -e, zE - t), P(-e, -e, zE - t)], "face", "var(--x1-trim)");
-      // the edges that face the light catch it: the eave, the rake, the ridge and the house's front corner
-      g += `<path class="hi" d="M${pt(P(LN + e, -e, zE))}L${pt(P(-e, -e, zE))}L${pt(P(-e, D / 2, zR))}L${pt(P(LN + e, D / 2, zR))}M${pt(P(0, 0, 0))}L${pt(P(0, 0, HT - 0.02))}"/>`;
       // Eight panels on the front slope, two rows of four from the gable end. Each is a grid of 48 by 48 pixels laid
       // in the roof's plane, so the pixels foreshorten with it; the share lit is the array's output over the most it
       // makes, scattered at random, none at night and all at full power. The roof and the dark panels are drawn under
@@ -1075,12 +1236,10 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         const [sa, sb] = cast(0, 0, 0.35);
         g += poly([onRoof(la0 + sa, lb0 + sb), onRoof(la1 + sa, lb0 + sb), onRoof(la1 + sa, lb1 + sb), onRoof(la0 + sa, lb1 + sb)], "pshade", "none");
       }
-      for (const p of panels) g += poly(p.q, "panel", "var(--x1-panel-off)");
+      for (const p of panels) g += poly(p.q, "panel", "url(#x1-gp)");
       const under = g;
       g = "";
       for (const p of panels) g += `<polygon points="${p.q.map(pt).join(" ")}" class="array"/>`;
-      // the pole just past the gable's corner; the grid's line reaches it at the junction's height
-      g += `<path class="edge" d="M${pt(P(0, poleB, 0))}L${pt(P(0, poleB, poleTop))}M${pt(P(0, poleB - 0.65, poleTop - 0.3))}L${pt(P(0, poleB + 0.65, poleTop - 0.3))}M${pt(P(0, poleB - 0.45, poleTop - 0.7))}L${pt(P(0, poleB + 0.45, poleTop - 0.7))}"/>`;
       // The circuit is a cross on the gable, as the X1 is installed: a vertical trunk under the ridge carries solar down
       // to the junction and the battery's power up from the foot of the wall; a horizontal trunk carries the house's
       // power along the wall into the house and the grid's out to the pole. The junction is a flush plate where the
@@ -1088,7 +1247,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       // each a bar of charge with the reserve marked across it.
       // The solar line leaves the top row of panels at its gable end, runs down the slope's edge to the rake and drops
       // straight down the gable into the junction, which sits under the drop
-      const Ls = 3.2, hd = 0.06, hubB = Ls + e - hd, hubZ = 1.95, hw = 0.4, hh = 0.4;
+      const Ls = 3.2, hd = 0.12, hubB = Ls + e - hd, hubZ = 1.95, hw = 0.4, hh = 0.4;
       // The towers are rooted at the right: the last stands where the gable's foot ends and each added pack pushes the
       // row left, so with fewer packs the battery's line runs farther along the wall. Battery's figure stands on the root.
       const towers = Math.max(1, Math.min(4, Math.round(L.towers ?? 1))), tg = 0.22, th = 1.5, tEnd = D - 0.23;
@@ -1097,7 +1256,9 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const cB = 0.707 * (tEnd - 0.475 + td);
       const towerLb = (i) => t0 + i * (tw + tg);
       const soc = L.soc === null ? null : clamp(L.soc, 0, 100) / 100, resZ = (L.reserve / 100) * th;
-      const hubL = P(-hd, hubB - hw, hubZ), hubR = P(-hd, hubB + hw, hubZ), hubT = P(-hd, hubB, hubZ + hh), hubD = P(-hd, hubB, hubZ - hh);
+      // every line ends at one point on the wall behind the plate's centre, hidden by it: the house's and the grid's
+      // run level along the gable, the battery's rises plumb from the wall's foot, solar's drops plumb from the rake
+      const hubC = P(0, Ls + e, hubZ);
       // Every wire carries one lane per source of the energy on it, side by side in the source's colour: the house
       // line can carry solar, the battery and the grid at once, the battery line solar and the grid while charging,
       // the grid line solar and the battery while selling. A wire never carries power both ways at once (the cloud
@@ -1105,10 +1266,10 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       // A direction counts only above the threshold its figure uses, so a trickle never reads as charging or selling.
       const charging = L.chg > 0.05 && L.chg > L.dis, selling = L.exp > 0.05 && L.exp > L.imp;
       const wires = [
-        ["solar", [onRoof(aa0, Ls), P(-e, Ls, roofZ(Ls)), hubT], false, { solar: L.solar }],
-        ["home", [P(oa0, -od / 2, hubZ), P(0, 0, hubZ), hubL], true, { solar: L.flows.Sh, batt: L.flows.Bh, grid: L.flows.Gh }],
-        ["batt", [P(0, t0, 0.22), P(0, hubB, 0.22), hubD], charging, charging ? { solar: L.flows.Sb, grid: L.flows.Gb } : { batt: L.dis }],
-        ["grid", [P(0, poleB, hubZ), P(0, D, hubZ), hubR], selling, selling ? { solar: L.flows.Sg, batt: L.flows.Bg } : { grid: L.imp }],
+        ["solar", [onRoof(aa0, Ls), P(-e, Ls, roofZ(Ls)), hubC], false, { solar: L.solar }],
+        ["home", [P(oa0, -od / 2, hubZ), P(0, 0, hubZ), hubC], true, { solar: L.flows.Sh, batt: L.flows.Bh, grid: L.flows.Gh }],
+        ["batt", [P(0, t0, 0.22), P(0, Ls + e, 0.22), hubC], charging, charging ? { solar: L.flows.Sb, grid: L.flows.Gb } : { batt: L.dis }],
+        ["grid", [P(poleA, poleB - poleR, hubZ), hubC], selling, selling ? { solar: L.flows.Sg, batt: L.flows.Bg } : { grid: L.imp }],
       ];
       const LANE = 3.5, ORDER = ["solar", "batt", "grid"];
       const maxP = Math.max(0.5, L.solar, L.imp, L.exp, L.chg, L.dis, L.home);
@@ -1135,10 +1296,11 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         live.push({ key, lanes });
       }
       g += poly([P(0, hubB - hw - 0.1, hubZ - hh - 0.1), P(0, hubB + hw - 0.1, hubZ - hh - 0.1), P(0, hubB + hw - 0.1, hubZ + hh - 0.1), P(0, hubB - hw - 0.1, hubZ + hh - 0.1)], "shade", "var(--x1-shadow)");
-      g += poly([P(-hd, hubB - hw, hubZ - hh), P(0, hubB - hw, hubZ - hh), P(0, hubB - hw, hubZ + hh), P(-hd, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate)");
-      g += poly([P(-hd, hubB - hw, hubZ + hh), P(-hd, hubB + hw, hubZ + hh), P(0, hubB + hw, hubZ + hh), P(0, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate)");
-      g += poly([P(-hd, hubB - hw, hubZ - hh), P(-hd, hubB + hw, hubZ - hh), P(-hd, hubB + hw, hubZ + hh), P(-hd, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate)");
-      g += `<path class="plate-edge" d="M${pt(P(-hd, hubB - hw, hubZ + hh))}L${pt(P(-hd, hubB - hw, hubZ - hh))}L${pt(P(-hd, hubB + hw, hubZ - hh))}"/>`;
+      // the plate itself is drawn over the lines and their beads: its face toward the gable's side, its top catching the
+      // high sun, its narrow side in shade
+      const plate = poly([P(-hd, hubB - hw, hubZ - hh), P(0, hubB - hw, hubZ - hh), P(0, hubB - hw, hubZ + hh), P(-hd, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate-side)")
+        + poly([P(-hd, hubB - hw, hubZ + hh), P(-hd, hubB + hw, hubZ + hh), P(0, hubB + hw, hubZ + hh), P(0, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate-top)")
+        + poly([P(-hd, hubB - hw, hubZ - hh), P(-hd, hubB + hw, hubZ - hh), P(-hd, hubB + hw, hubZ + hh), P(-hd, hubB - hw, hubZ + hh)], "hub", "var(--x1-plate-front)");
       // the towers, the farthest first so the nearer ones stand in front of it
       // a shadow on the ground under the row; each tower a cabinet tinted with the battery's colour, its charge a solid
       // fill from the floor, the narrow side away from the light darker and the top lightest, the reserve marked across
@@ -1148,10 +1310,10 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         const face = (z0, z1) => [P(-td, lb0, z0), P(-td, lb1, z0), P(-td, lb1, z1), P(-td, lb0, z1)];
         const side = (z0, z1) => [P(-td, lb0, z0), P(0, lb0, z0), P(0, lb0, z1), P(-td, lb0, z1)];
         const lid = (z) => [P(-td, lb0, z), P(-td, lb1, z), P(0, lb1, z), P(0, lb0, z)];
-        g += poly(face(0, th), "cab", "var(--x1-cab-lit)") + poly(side(0, th), "cab", "var(--x1-cab)") + poly(lid(th), "cab", "var(--x1-cab-top)");
+        g += poly(face(0, th), "cab", "url(#x1-gk)") + poly(side(0, th), "cab", "var(--x1-cab)") + poly(lid(th), "cab", "var(--x1-cab-top)");
         if (soc !== null && soc > 0.01) {
           const z = soc * th;
-          g += poly(face(0, z), "charge", "var(--x1-batt)") + poly(side(0, z), "charge", "var(--x1-batt-shade)") + poly(lid(z), "charge", "var(--x1-batt-top)");
+          g += poly(face(0, z), "charge", "url(#x1-gq)") + poly(side(0, z), "charge", "var(--x1-batt-shade)") + poly(lid(z), "charge", "var(--x1-batt-top)");
         }
         g += `<path class="mark" d="M${pt(P(-td, lb0, resZ))}L${pt(P(-td, lb1, resZ))}"/>`;
       }
@@ -1159,9 +1321,9 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const kw = (v) => (v > 0.05 ? `${f.num(v, v >= 10 ? 0 : 1)}${NB}kW` : `0${NB}kW`);
       const words = [
         ["Solar", kw(L.solar)],
-        [`Grid · ${selling ? "selling" : L.imp > 0.05 ? "buying" : "idle"}`, kw(Math.max(L.imp, L.exp))],
+        ["Grid", kw(Math.max(L.imp, L.exp))],
         ["House", kw(L.home)],
-        [`Battery${towers > 1 ? ` ×${towers}` : ""}`, kw(Math.max(L.chg, L.dis)), L.chg > 0.05 ? "charging" : L.dis > 0.05 ? "discharging" : "idle"],
+        [`Battery${towers > 1 ? ` ×${towers}` : ""}`, kw(Math.max(L.chg, L.dis))],
       ];
       // the skeleton is built once per size: the scene group is redrawn freely, the dot strands persist so a refresh
       // or a change of speed never restarts their drift, and the labels keep their nodes
@@ -1169,7 +1331,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       let svg = host.querySelector("svg");
       if (!svg || svg.dataset.size !== size) {
         this._pxKey = null;
-        host.innerHTML = `<div class="stage" style="width:${W}px;height:${H}px"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="over" role="img" data-size="${size}"><defs><clipPath id="x1fc"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath></defs><g clip-path="url(#x1fc)" data-scene></g><g clip-path="url(#x1fc)">${live.map((w) => [0, 1, 2].map((i) => `<path class="dots" data-w="${w.key}" data-i="${i}" visibility="hidden"/>`).join("")).join("")}</g><g>${words.map((w_, i) => `<line class="lead" data-l="${i}"/>${i < 2 ? `<rect class="tag" data-t="${i}" rx="6" width="0" height="0"/>` : ""}<text class="port" data-n="${i}"></text>${i === 3 ? `<text class="port" data-s="${i}"></text>` : ""}<text class="port v" data-v="${i}"></text>`).join("")}</g></svg><canvas data-px aria-hidden="true"></canvas><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="under" aria-hidden="true"><g data-under></g></svg><i class="px-ink" hidden></i></div>`;
+        host.innerHTML = `<div class="stage" style="width:${W}px;height:${H}px"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="over" role="img" data-size="${size}"><defs><clipPath id="x1fc"><rect x="0" y="0" width="${W}" height="${H}"/></clipPath></defs><g clip-path="url(#x1fc)" data-scene></g><g clip-path="url(#x1fc)" data-beads>${live.map((w) => [0, 1, 2].map((i) => `<path class="dots" data-w="${w.key}" data-i="${i}" visibility="hidden"/>`).join("")).join("")}</g><g data-top></g><g>${words.map((w_, i) => `<line class="lead" data-l="${i}"/>${i < 2 ? `<rect class="tag" data-t="${i}" rx="6" width="0" height="0"/>` : ""}<text class="port" data-n="${i}"></text><text class="port v" data-v="${i}"></text>`).join("")}</g></svg><canvas data-px aria-hidden="true"></canvas><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="under" aria-hidden="true"><g data-under></g></svg><i class="px-ink" hidden></i></div>`;
         svg = host.querySelector("svg");
       }
       const underG = host.querySelector("[data-under]");
@@ -1179,6 +1341,8 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (svg.getAttribute("aria-label") !== lede) svg.setAttribute("aria-label", lede);
       const scene = svg.querySelector("[data-scene]");
       if (scene.innerHTML !== g) scene.innerHTML = g;
+      const topG = svg.querySelector("[data-top]");
+      if (topG.innerHTML !== plate) topG.innerHTML = plate;
       const setA = (el, a, v) => { if (el.getAttribute(a) !== String(v)) el.setAttribute(a, v); };
       // old data draws no drift: the wires keep their colours, the dots stand still until a fresh report
       const motion = this._motion() && !L.stale && L.state !== "unknown";
@@ -1199,20 +1363,20 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const rise = (near[1] - far[1]) / Math.max(1, near[0] - far[0]);
       const topY = (x) => (x <= near[0] ? near[1] - (near[0] - x) * rise : near[1] + (x - near[0]) * (back[1] - near[1]) / Math.max(1, back[0] - near[0]));
       const INK = 30, GAP = 6, across = (x) => (x - O[0]) / (0.707 * k), lbTop = pb1 - gap / 2;
-      const lx = [cS, cG, cH, cB].map((c) => Math.round(O[0] + c * k) + 0.5);
+      const lx = [cS, cB, cH, cB].map((c) => Math.round(O[0] + c * k) + 0.5);
       const hit = [
-        onRoof(lbTop - across(lx[0]), lbTop)[1] - 2, P(0, poleB, poleTop)[1] - 2,
+        onRoof(lbTop - across(lx[0]), lbTop)[1] - 2, 0,
         P(-across(lx[2]) - od, -od, oz0)[1] + 2, P(-td, across(lx[3]) - td, 0)[1] + 2,
       ];
       const wKey = `${size}|${towers}`;
       if (this._labW?.key !== wKey) {
-        const widest = [["Solar", "8.8 kW"], ["Grid · selling", "8.8 kW"], ["House", "8.8 kW"], [`Battery${towers > 1 ? ` ×${towers}` : ""}`, "8.8 kW", "discharging"]];
-        const ws = widest.map(([nm, vl, st], i) => {
-          const n = svg.querySelector(`[data-n="${i}"]`), v = svg.querySelector(`[data-v="${i}"]`), sn = svg.querySelector(`[data-s="${i}"]`);
-          n.textContent = nm; v.textContent = vl; if (sn) sn.textContent = st;
-          return Math.max(n.getComputedTextLength?.() ?? 0, v.getComputedTextLength?.() ?? 0, sn?.getComputedTextLength?.() ?? 0);
+        const widest = [["Solar", "8.8 kW"], ["Grid", "8.8 kW"], ["House", "8.8 kW"], [`Battery${towers > 1 ? ` ×${towers}` : ""}`, "8.8 kW"]];
+        const ws = widest.map(([nm, vl], i) => {
+          const n = svg.querySelector(`[data-n="${i}"]`), v = svg.querySelector(`[data-v="${i}"]`);
+          n.textContent = nm; v.textContent = vl;
+          return Math.max(n.getComputedTextLength?.() ?? 0, v.getComputedTextLength?.() ?? 0);
         });
-        this._labW = ws.every((w) => w > 0) ? { key: wKey, ws } : { key: null, ws: widest.map(([nm, vl, st]) => Math.max(nm.length * 6.6, vl.length * 7.4, (st ?? "").length * 6.6)) };
+        this._labW = ws.every((w) => w > 0) ? { key: wKey, ws } : { key: null, ws: widest.map(([nm, vl]) => Math.max(nm.length * 6.6, vl.length * 7.4)) };
       }
       const ws = this._labW.ws, right = [], flush = [];
       for (const row of [[0, 1], [2, 3]]) {
@@ -1222,19 +1386,17 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
           right[i] = r; flush[i] = r === want; edge = r + 12;
         }
       }
-      words.forEach(([name, val, state], i) => {
-        const n = svg.querySelector(`[data-n="${i}"]`), v = svg.querySelector(`[data-v="${i}"]`), l = svg.querySelector(`[data-l="${i}"]`), tag = svg.querySelector(`[data-t="${i}"]`), sn = svg.querySelector(`[data-s="${i}"]`);
+      words.forEach(([name, val], i) => {
+        const n = svg.querySelector(`[data-n="${i}"]`), v = svg.querySelector(`[data-v="${i}"]`), l = svg.querySelector(`[data-l="${i}"]`), tag = svg.querySelector(`[data-t="${i}"]`);
         if (n.textContent !== name) n.textContent = name;
         if (v.textContent !== val) v.textContent = val;
-        // a bottom figure's lines stack up from the row's baseline, so the figures share it; Battery's state sits
-        // between its name and its figure
-        const top = i < 2, y = top ? 12 : H - 18 - (sn ? 16 : 0), x = right[i].toFixed(1);
+        const top = i < 2, y = top ? 12 : H - 18, x = right[i].toFixed(1);
         setA(n, "x", x); setA(n, "y", y); setA(n, "text-anchor", "end");
-        if (sn) { if (sn.textContent !== state) sn.textContent = state; setA(sn, "x", x); setA(sn, "y", y + 16); setA(sn, "text-anchor", "end"); }
-        setA(v, "x", x); setA(v, "y", top ? y + 16 : H - 2); setA(v, "text-anchor", "end");
+        setA(v, "x", x); setA(v, "y", y + 16); setA(v, "text-anchor", "end");
         if (tag) { const open = topY(right[i] - ws[i]) >= INK + 3; setA(tag, "visibility", open ? "hidden" : "visible"); setA(tag, "x", (right[i] - ws[i] - 4).toFixed(1)); setA(tag, "y", (y - 13).toFixed(1)); setA(tag, "width", (ws[i] + 8).toFixed(1)); setA(tag, "height", "34"); }
+        // Grid stands beside its pole, set over Battery's column, and needs no lead
         const [y1, y2] = top ? [flush[i] ? 2 : INK + 4, hit[i]] : [hit[i], flush[i] ? H - 4 : H - 32];
-        setA(l, "visibility", y2 > y1 + 4 ? "visible" : "hidden"); setA(l, "x1", lx[i]); setA(l, "x2", lx[i]); setA(l, "y1", y1.toFixed(1)); setA(l, "y2", y2.toFixed(1));
+        setA(l, "visibility", i !== 1 && y2 > y1 + 4 ? "visible" : "hidden"); setA(l, "x1", lx[i]); setA(l, "x2", lx[i]); setA(l, "y1", y1.toFixed(1)); setA(l, "y2", y2.toFixed(1));
       });
     }
 
@@ -1287,10 +1449,16 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
           <span class="nav"><button class="chev" data-nav="prev" title="Previous period" aria-label="Previous period">‹</button><button class="chev" data-nav="next" title="Next period" aria-label="Next period">›</button><button data-nav="now" title="Back to now">Now</button></span><span class="meta pvs" data-k="pvs"></span>
           <div class="head-r"><span class="seg" role="group" aria-label="Period">${VIEWS.map((v) => `<button data-view="${v}" aria-pressed="${this._view === v}">${v[0].toUpperCase()}${v.slice(1)}</button>`).join("")}</span>
           <button class="tbtn" data-csv title="Download this period as CSV">CSV</button></div></div>
-        <div class="heads" data-ledger>${["Solar", "House", "Bought", "Sold", "Charged", "Discharged"].map((n) => `<div class="cell card"><div class="cn">${n}</div><div class="cv">—</div><div class="cd"></div></div>`).join("")}</div>
-        <div class="pbody" data-mg></div>
-        <section class="card meaning"><div class="rings" data-rings></div>
-        <div class="foot"><span data-k="foot">Anker cloud statistics</span><span class="fr" data-k="footr"></span></div></section></section>`;
+        <section class="card house"><div class="lede" data-k="lede" role="img"></div>
+          <div class="hero-row">
+            <div class="ring" data-ring></div>
+            <div class="hero-txt">
+              <div class="v" data-k="h2"></div>
+              <div class="k" data-k="h1"></div>
+            </div>
+          </div>
+          <div class="flow" data-flow></div></section>
+        <div class="pbody" data-mg></div></section>`;
     }
     _syncTabs() { this._root.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === this._view))); }
 
@@ -1303,15 +1471,17 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (next) next.disabled = !P.next; if (now) now.disabled = P.isNow;
       this._renderLedger();
       this._renderRings();
-      const host = this._root.querySelector("[data-mg]");
-      const ghost = fade ? this._ghost(host) : null;
-      this._drawChart();
-      this._settle(host, ghost);
+      // the meaning card's foot is set before the charts are drawn: the battery's strip takes the Now column's
+      // remaining height, which the foot's wrapping changes
       const foot = this._root.querySelector('[data-k="foot"]'), footr = this._root.querySelector('[data-k="footr"]');
       if (foot) { foot.textContent = this._perror ? "Statistics unavailable" : `Anker's totals · charts from its ${P.view === "day" ? "5-minute averages" : P.view === "year" ? "monthly totals" : "daily totals"}`; foot.title = this._perror ? String(this._perror) : ""; }
       // the lifetime saving sits in the meaning card until a tariff prices each period, then here
       const tariff = Number(this._config.rate_import) > 0, LL = this._L;
       if (footr) footr.textContent = LL?.yieldMwh ? `${f.num(LL.yieldMwh, 2)}${NB}MWh since install${tariff && LL.savings ? ` · ${this._money(LL.savings)} saved by Anker's count` : ""}` : "";
+      const host = this._root.querySelector("[data-mg]"), host2 = this._root.querySelector("[data-mg2]");
+      const ghost = fade ? this._ghost(host) : null, ghost2 = fade ? this._ghost(host2) : null;
+      this._drawChart();
+      this._settle(host, ghost); this._settle(host2, ghost2);
       if (P.isNow && P.view === "day") this._applyLive();
     }
 
@@ -1365,17 +1535,19 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (!host) return;
       const r = 17, C = 2 * Math.PI * r;
       const ring = (segs) => { let off = 0; const arcs = segs.map(([share, col]) => { const a = `<circle cx="22" cy="22" r="${r}" fill="none" stroke="${col}" stroke-width="7" stroke-dasharray="${(C * share).toFixed(2)} ${C}" stroke-dashoffset="${(-off * C).toFixed(2)}" transform="rotate(-90 22 22)"/>`; off += share; return a; }).join(""); return `<svg viewBox="0 0 44 44" aria-hidden="true"><circle class="track" cx="22" cy="22" r="${r}" fill="none" stroke-width="7"/>${arcs}</svg>`; };
-      const item = (svg, value, name, note, title) => `<div class="rg${svg ? "" : " fig"}" title="${esc(title)}">${svg}<div class="rt"><div class="rv">${esc(value)}</div><div class="rn">${esc(name)}</div><div class="rn">${esc(note)}</div></div></div>`;
+      // each a tile as the place's six are: its name at the top, its figure under it (at the tile's foot when the tile
+      // is taller than its words)
+      const item = (svg, value, name, note, title) => `<div class="rg${svg ? "" : " fig"}" title="${esc([note, title].filter(Boolean).join(". "))}"><div class="rn">${esc(name)}</div><div class="rtop">${svg}<span class="rv">${esc(value)}</span></div></div>`;
       const kwh = (v) => (v >= 1000 ? `${f.num(v / 1000, v >= 10000 ? 1 : 2)}${NB}MWh` : `${f.num(v, v >= 100 ? 0 : 1)}${NB}kWh`);
       let html = "";
-      if (!T) html += item(ring([[0, "transparent"]]), "—", "self-sufficient", "", "") + item("", "—", "of solar kept", "", "");
+      if (!T) html += item(ring([[0, "transparent"]]), "—", "self-sufficient", "", "") + item("", "—", "solar kept", "", "");
       if (T) {
         // the split's percentages are rounded to add up to 100, and self-sufficiency is the two that are not the grid
         const sp = T.split ? shares([T.split.solar, T.split.batt, T.split.grid]) : null;
         html += item(ring(T.split ? [[T.split.solar, "var(--x1-solar)"], [T.split.batt, "var(--x1-batt)"], [T.split.grid, "var(--x1-grid)"]] : [[0, "transparent"]]),
           sp ? `${f.num(100 - sp[2])}%` : "—", "self-sufficient", sp ? `solar ${sp[0]}% · battery ${sp[1]}% · grid ${sp[2]}%` : "nothing used yet",
           `Of what the house used (${kwh(T.L)}), the share that did not come from the grid: solar and battery together.`);
-        html += item("", T.kept === null ? "—" : `${f.num(T.kept * 100)}%`, "of solar kept", T.S > 0 ? `sold ${kwh(T.Sg)} of ${kwh(T.S)}` : "no solar yet",
+        html += item("", T.kept === null ? "—" : `${f.num(T.kept * 100)}%`, "solar kept", T.S > 0 ? `sold ${kwh(T.Sg)} of ${kwh(T.S)}` : "no solar yet",
           "Solar used at home or stored, as a share of what was produced over this period.");
       }
       // the saving: this period's at the owner's tariff when one is set, else Anker's own lifetime figure
@@ -1384,7 +1556,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         const saved = (T.L - T.Gi) * ri + T.Ge * re;
         html += item("", `${saved < 0 ? "−" : ""}${this._money(Math.abs(saved), Math.abs(saved) >= 100 ? 0 : 2)}`, "saved", `at ${this._money(ri, 2)} bought${re ? `, ${this._money(re, 2)} sold` : ""} per kWh`,
           "What the period cost less than buying everything the house used: (used − bought) × import rate + sold × export rate.");
-      } else if (life) html += item("", this._money(life), "saved since install", "Anker's figure", "Anker's own count over the system's life. Set an import rate in the card's options to price each period at your tariff.");
+      } else if (life) html += item("", this._money(life), "saved", "Anker's figure since install", "Anker's own count over the system's life. Set an import rate in the card's options to price each period at your tariff.");
       else html += item("", "—", "saved", T ? "set a tariff in the card's options" : "", "Set rate_import (and rate_export) in the card's options to price each period at your tariff.");
       if (host.innerHTML !== html) host.innerHTML = html;
     }
@@ -1392,17 +1564,25 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     /* ----- the chart: two strips on one axis ----- */
 
     _drawChart() {
-      const host = this._root?.querySelector("[data-mg]"), P = this._P, D = this._data;
-      if (!host || !P) return;
+      // The power chart stands under the drawing in the period column; the battery's strip stands compact in the Now
+      // column under the ring, its key above it. Each has its own width and scale, and a reading moves both.
+      const host = this._root?.querySelector("[data-mg]"), host2 = this._root?.querySelector("[data-mg2]"), P = this._P, D = this._data;
+      if (!host || !host2 || !P) return;
       const f = this._fmt(), narrow = this._mode() === "narrow", wide = this._mode() === "wide";
-      const W = Math.max(240, host.clientWidth), total = wide ? host.clientHeight : narrow ? 560 : 380;
-      const pad = this._tight ? 10 : 14, gap = this._tight ? 10 : 16, tile = narrow ? 0 : 168 + 14, axisH = 24;
-      const sw_width = Math.max(200, W - 2 * pad - tile - 2);
+      const W = Math.max(240, host.clientWidth), total = wide ? host.clientHeight : narrow ? 380 : 300;
+      const pad = this._tight ? 10 : 14, axisH = 24;
+      const sw_width = Math.max(200, W - 2 * pad - 2);
       const x0 = P.t0, x1 = P.t1;
-      // two cards share the height: each spends its padding, its border and its axis, the rest is strip
-      const chrome = 2 * pad + axisH + 2 + (narrow ? 60 : 0);
-      const body = Math.max(140, total - 2 * chrome - gap);
-      const H1 = Math.round(body * 0.7), H2 = body - H1;
+      // the power card spends its padding, its border, its head row (its name and key: one 20 px line and the row gap,
+      // or wrapped to two lines on a phone) and its axis; the rest is strip
+      // (on a wide screen the head row is measured after a first drawing, since its height follows the theme's fonts)
+      const fixKey = `${this._tight}`, fix = wide && this._chromeFix?.k === fixKey ? this._chromeFix.v : 0;
+      const chrome = 2 * pad + axisH + 2 + (narrow ? 60 : 28) + fix;
+      const H1 = Math.max(this._tight ? 100 : 120, total - chrome);
+      // the battery's strip: in the wide layout it takes the height the Now column leaves it (fitted after a first
+      // drawing measures its key and axis); stacked, a fixed height
+      let H2 = narrow ? 96 : 80;
+      const W2 = Math.max(200, host2.clientWidth), sw2 = Math.max(160, W2 - 2 * pad - 2);
       const buckets = D?.buckets ?? [];
       const have = buckets.filter((b) => !b.empty);
       // strip 1's scale and ticks come first, so the tick column is as wide as the widest label it draws
@@ -1419,13 +1599,17 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const raise = (x) => { const q = 10 ** Math.floor(Math.log10(x) + 1e-9), m = Math.round(x / q); return (m >= 5 ? 10 : m >= 2 ? 5 : 2) * q; };
       let step = big > 0 ? nice(big / 3.5) : 0;
       while (step > 0 && step * scale < 22) step = raise(step);
+      // a plot too short for that keeps one tick a side, at the largest round value inside the taller half, if it
+      // clears a label's height above the line
+      let single = false;
+      if (step > big * 1.02) { step = nice(big); single = step * scale >= 12; if (!single) step = 0; }
       const frac = (x) => Math.abs(x - Math.round(x)) > 1e-6, dp = !frac(step) ? 0 : !frac(step * 10) ? 1 : 2;
       const mdp = !frac(step / 1000) ? 0 : !frac(step / 100) ? 1 : 2;
       const tickLabel = (v) => (big >= 1000 ? `${f.num(v / 1000, mdp)}${NB}MWh` : `${f.num(v, dp)}${NB}${P.view === "day" ? "kW" : "kWh"}`);
       const ticks = [];
       if (have.length && step > 0) {
-        for (let k = 1; k <= 5 && k * step <= maxUp * 1.02; k++) { const y = sy1(k * step); if (y > padT + 4) ticks.push([y, tickLabel(k * step)]); }
-        for (let k = 1; k <= 5 && k * step <= maxDn * 1.02; k++) { const y = zero + k * step * scale; if (y < H1 - padB + 4) ticks.push([y, tickLabel(k * step)]); }
+        for (let k = 1; k <= (single ? 1 : 5) && k * step <= maxUp * 1.02; k++) { const y = sy1(k * step); if (y > padT + 4) ticks.push([y, tickLabel(k * step)]); }
+        for (let k = 1; k <= (single ? 1 : 5) && k * step <= maxDn * 1.02; k++) { const y = zero + k * step * scale; if (y < H1 - padB + 4) ticks.push([y, tickLabel(k * step)]); }
       }
       const padL = Math.max(40, 14 + Math.ceil(6.8 * Math.max(4, ...ticks.map(([, t]) => t.length)))), padR = 10;
       const pw = sw_width - padL - padR;
@@ -1435,12 +1619,14 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const grid = (y) => `<line x1="${padL}" x2="${padL + pw}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--x1-grid-line)"/>`;
       const label = (v, y) => `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="tick">${esc(v)}</text>`;
       // strip 1: what supplied the house, stacked above zero; below it, what charged the battery and the solar sold.
-      // Hue is the source (solar, battery, grid): full strength supplies the house, a tint charges the battery, a hatch is sold.
-      let g1 = `<defs><pattern id="x1h" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><rect width="1.8" height="6" fill="var(--x1-solar)"/></pattern></defs>`;
+      // Hue is the source (solar, battery, grid): full strength supplies the house, a tint charges the battery; solar
+      // sold is green.
+      let g1 = "";
+      const clear = []; // boxes the band names keep out of: the cloud's edge note and the names already placed
       if (have.length) g1 += grid(zero);
       for (const [y, t] of ticks) g1 += grid(y) + label(t, y);
       if (markX !== null) g1 += `<line x1="${markX.toFixed(1)}" x2="${markX.toFixed(1)}" y1="0" y2="${H1}" stroke="var(--x1-axis)"/>`;
-      const FILL = { Sh: "var(--x1-solar)", Bh: "var(--x1-batt)", Gh: "var(--x1-grid)", Sb: "var(--x1-solar-tint)", Gb: "var(--x1-grid-tint)", Sg: "url(#x1h)" };
+      const FILL = { Sh: "var(--x1-solar)", Bh: "var(--x1-batt)", Gh: "var(--x1-grid)", Sb: "var(--x1-solar-tint)", Gb: "var(--x1-grid-tint)", Sg: "var(--x1-sold)" };
       if (P.view === "day") {
         // stacked areas through the midpoints of the 5-minute buckets; a run of readings is one polygon
         const area = (key, base, col) => {
@@ -1463,7 +1649,14 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         area((b) => -b.Sg, (b) => -b.Sb - b.Gb, FILL.Sg);
         // where the cloud's series ends short of now, the edge says so
         const last = have[have.length - 1];
-        if (P.isNow && last && Date.now() - last.t1 > 10 * 60e3) g1 += `<text x="${(sx(last.t1) - 4).toFixed(1)}" y="${(zero - 6).toFixed(1)}" text-anchor="end" class="tick halo">cloud to ${esc(f.time(last.t1))}</text>`;
+        if (P.isNow && last && Date.now() - last.t1 > 10 * 60e3) {
+          // in the top margin, which no area reaches, ending at the series' end; over the zero line only when the series
+          // ends so early that the note would meet the half's caption
+          const ex = sx(last.t1) - 4, note = `cloud to ${f.time(last.t1)}`, nw = note.length * 6.6;
+          const ny = ex - nw > padL + 6 + 13 * 6.6 + 12 ? 13 : zero - 6;
+          g1 += `<text x="${ex.toFixed(1)}" y="${ny.toFixed(1)}" text-anchor="end" class="tick halo">${esc(note)}</text>`;
+          clear.push([ex - nw, ex, ny - 12, ny + 4]);
+        }
       } else {
         const n = buckets.length, slot = pw / n, bw = Math.max(3, Math.min(28, slot * 0.6));
         for (let i = 0; i < n; i++) {
@@ -1477,41 +1670,54 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         }
       }
       // the two halves named where they begin, and each band labelled where it is widest, if it is wide enough
-      if (have.length) g1 += `<text x="${padL + 6}" y="13" class="tick halo">House ran on</text><text x="${padL + 6}" y="${H1 - 4}" class="tick halo">Stored · sold</text>`;
+      const unitWord = P.view === "day" ? "Power" : "Energy";
+      if (have.length) g1 += `<text x="${padL + 6}" y="13" class="tick halo">${unitWord} demand</text><text x="${padL + 6}" y="${H1 - 4}" class="tick halo">${unitWord} surplus</text>`;
       const bands = [["Sh", "solar", 0], ["Bh", "battery", 0], ["Gh", "grid", 0], ["Sb", "to battery", 1], ["Gb", "grid to battery", 1], ["Sg", "sold", 1]];
       const win = P.view === "day" ? 9 : 0;
       // only the day's areas take labels: a bar is narrower than its band's name
+      // where its band is widest, or the next widest place clear of the edge note and the names placed before it
       if (P.view === "day") for (const [key, name, below] of bands) {
-        let best = -1, at = -1;
-        for (let i = 0; i < buckets.length; i++) { let sum = 0, n = 0; for (let j = i - win; j <= i + win; j++) { const b = buckets[j]; if (b && !b.empty) { sum += b[key]; n++; } } const v = n === 2 * win + 1 || win === 0 ? sum / n : 0; if (v > best) { best = v; at = i; } }
-        const b = at >= 0 ? buckets[at] : null;
-        if (!b || best * scale < 15) continue;
-        const base = key === "Sh" ? 0 : key === "Bh" ? b.Sh : key === "Gh" ? b.Sh + b.Bh : key === "Sb" ? 0 : key === "Gb" ? b.Sb : b.Sb + b.Gb;
-        const mid = below ? zero + (base + b[key] / 2) * scale : sy1(base + b[key] / 2);
-        const x = P.view === "day" ? (sx(b.t) + sx(b.t1)) / 2 : padL + (pw / buckets.length) * (at + 0.5);
-        g1 += `<text x="${x.toFixed(1)}" y="${(mid + 4).toFixed(1)}" text-anchor="middle" class="tick halo on">${esc(name)}</text>`;
+        const cand = [];
+        for (let i = 0; i < buckets.length; i++) { let sum = 0, n = 0; for (let j = i - win; j <= i + win; j++) { const b = buckets[j]; if (b && !b.empty) { sum += b[key]; n++; } } const v = n === 2 * win + 1 || win === 0 ? sum / n : 0; if (v * scale >= 15 && !buckets[i].empty) cand.push([v, i]); }
+        cand.sort((a, c) => c[0] - a[0]);
+        const hw = name.length * 3.4 + 4;
+        for (const [, at] of cand) {
+          const b = buckets[at];
+          const base = key === "Sh" ? 0 : key === "Bh" ? b.Sh : key === "Gh" ? b.Sh + b.Bh : key === "Sb" ? 0 : key === "Gb" ? b.Sb : b.Sb + b.Gb;
+          const mid = below ? zero + (base + b[key] / 2) * scale : sy1(base + b[key] / 2);
+          const x = (sx(b.t) + sx(b.t1)) / 2;
+          if (clear.some(([a0, a1, c0, c1]) => x + hw > a0 && x - hw < a1 && mid + 8 > c0 && mid - 8 < c1)) continue;
+          g1 += `<text x="${x.toFixed(1)}" y="${(mid + 4).toFixed(1)}" text-anchor="middle" class="tick band b${key}" stroke="${FILL[key]}">${esc(name)}</text>`;
+          clear.push([x - hw, x + hw, mid - 8, mid + 8]);
+          break;
+        }
       }
       g1 += `<line data-xh x1="0" x2="0" y1="0" y2="${H1}" stroke="var(--x1-ink2)" visibility="hidden"/>`;
-      this._mgGeom.strips.push({ H: H1, sy: sy1, zero });
-      // strip 2: state of charge (day) or self-sufficiency per bucket
+      this._mgGeom.strips.push({ H: H1, sy: sy1, zero, sx, padL, pw });
+      // strip 2: state of charge (day) or self-sufficiency per bucket, on the Now column's width
+      const padL2 = 40, pw2 = sw2 - padL2 - 10, sx2 = (t) => padL2 + ((t - x0) / (x1 - x0)) * pw2;
+      const markX2 = P.isNow && P.view === "day" ? sx2(Math.min(x1, Date.now())) : null;
+      const grid2 = (y) => `<line x1="${padL2}" x2="${padL2 + pw2}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--x1-grid-line)"/>`;
+      const label2 = (v, y) => `<text x="${padL2 - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="tick">${esc(v)}</text>`;
+      const res = clamp(Number(this._config.reserve) || 0, 0, 100);
+      const strip2 = (H2) => {
       let g2 = "";
       const p2T = 10, p2B = 6, ph2 = H2 - p2T - p2B, sy2 = (v) => p2T + ph2 - (v / 100) * ph2;
-      g2 += grid(sy2(100)) + grid(sy2(50)) + label("100%", sy2(100)) + label("50%", sy2(50));
-      if (markX !== null) g2 += `<line x1="${markX.toFixed(1)}" x2="${markX.toFixed(1)}" y1="0" y2="${H2}" stroke="var(--x1-axis)"/>`;
+      g2 += grid2(sy2(100)) + grid2(sy2(50)) + label2("100%", sy2(100)) + label2("50%", sy2(50));
+      if (markX2 !== null) g2 += `<line x1="${markX2.toFixed(1)}" x2="${markX2.toFixed(1)}" y1="0" y2="${H2}" stroke="var(--x1-axis)"/>`;
       let when = "";
-      const res = clamp(Number(this._config.reserve) || 0, 0, 100);
       if (P.view === "day") {
         // the charge over the day as a fill level, the towers' picture: a soft mass under the line, the reserve rule
         // over the mass, the line on top
         const runs = []; let cur = null;
-        for (const b of buckets) { if (b.empty || b.soc === null || b.soc === undefined) { cur = null; continue; } if (!cur) { cur = []; runs.push(cur); } cur.push([(sx(b.t) + sx(b.t1)) / 2, sy2(b.soc)]); }
+        for (const b of buckets) { if (b.empty || b.soc === null || b.soc === undefined) { cur = null; continue; } if (!cur) { cur = []; runs.push(cur); } cur.push([(sx2(b.t) + sx2(b.t1)) / 2, sy2(b.soc)]); }
         const floor = sy2(0), xy = ([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`;
         for (const r of runs) if (r.length > 1) g2 += `<path class="soc-fill" d="M${r.map(xy).join("L")}L${r[r.length - 1][0].toFixed(1)},${floor.toFixed(1)}L${r[0][0].toFixed(1)},${floor.toFixed(1)}Z"/>`;
-        g2 += `<line x1="${padL}" x2="${padL + pw}" y1="${sy2(res).toFixed(1)}" y2="${sy2(res).toFixed(1)}" stroke="var(--x1-ink2)" stroke-dasharray="4 4"/>`;
+        g2 += `<line x1="${padL2}" x2="${padL2 + pw2}" y1="${sy2(res).toFixed(1)}" y2="${sy2(res).toFixed(1)}" stroke="var(--x1-ink2)" stroke-dasharray="4 4"/>`;
         const d = runs.filter((r) => r.length > 1).map((r) => `M${r.map(xy).join("L")}`).join("");
         if (d) g2 += `<path d="${d}" fill="none" stroke="var(--x1-batt)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
         const last = [...have].reverse().find((b) => b.soc !== null && b.soc !== undefined);
-        if (last) g2 += `<circle cx="${((sx(last.t) + sx(last.t1)) / 2).toFixed(1)}" cy="${sy2(last.soc).toFixed(1)}" r="4" fill="var(--x1-batt)" stroke="var(--x1-surface)" stroke-width="2"/>`;
+        if (last) g2 += `<circle cx="${((sx2(last.t) + sx2(last.t1)) / 2).toFixed(1)}" cy="${sy2(last.soc).toFixed(1)}" r="4" fill="var(--x1-batt)" stroke="var(--x1-surface)" stroke-width="2"/>`;
         // the longest run below the reserve is named in the tile, not drawn over the line
         let run = null, best = null;
         for (const b of buckets) { const below = !b.empty && b.soc !== null && b.soc !== undefined && b.soc < res - 0.5; if (below) { run = run ?? { t: b.t, n: 0 }; run.n++; run.t1 = b.t1; } else if (run) { if (!best || run.n > best.n) best = run; run = null; } }
@@ -1522,34 +1728,59 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       } else {
         // each bucket's self-sufficiency as a bar under its energy bar, split the way the ring splits it: the solar
         // share, then the battery share, up to the share not bought; a share nothing attributes stays neutral
-        const n = buckets.length, slot = pw / n, bw = Math.max(3, Math.min(28, slot * 0.6));
+        const n = buckets.length, slot = pw2 / n, bw = Math.max(3, Math.min(28, slot * 0.6));
         const rect = (x, v0, v1, fill) => (v1 - v0 > 0.05 ? `<rect x="${x.toFixed(1)}" y="${sy2(v1).toFixed(1)}" width="${bw.toFixed(1)}" height="${(sy2(v0) - sy2(v1)).toFixed(1)}" fill="${fill}"/>` : "");
         for (let i = 0; i < n; i++) {
           const b = buckets[i]; if (b.empty || !(b.L > 0)) continue;
-          const v = clamp(1 - Math.min(b.L, b.Gh) / b.L, 0, 1) * 100, own = b.Sh + b.Bh, x = padL + slot * i + (slot - bw) / 2;
+          const v = clamp(1 - Math.min(b.L, b.Gh) / b.L, 0, 1) * 100, own = b.Sh + b.Bh, x = padL2 + slot * i + (slot - bw) / 2;
           if (!(own > 0)) { g2 += rect(x, 0, v, "var(--x1-axis)"); continue; }
           const vs = v * (b.Sh / own);
           g2 += rect(x, 0, vs, "var(--x1-solar)") + rect(x, vs, v, "var(--x1-batt)");
         }
       }
       g2 += `<line data-xh x1="0" x2="0" y1="0" y2="${H2}" stroke="var(--x1-ink2)" visibility="hidden"/>`;
-      this._mgGeom.strips.push({ H: H2, sy: sy2 });
+      return { g2, when, sy2 };
+      };
+      let s2 = strip2(H2);
       const empty = this._perror ? `Anker's cloud didn't answer.${P.isNow ? " Trying again in five minutes." : " Choose the period again to retry."}` : !D ? "Loading…" : have.length ? "" : P.view === "day" && P.isNow ? "The day has just begun." : "No data for this period.";
       // the tiles: each chart's name, and its key in three short lines
       const sw = (col, extra = "") => `<i class="sw${extra}"${col ? ` style="background:${col}"` : ""}></i>`;
       const T = D?.T;
       const grp = (title, line) => `<div class="kgp">${title ? `<div class="kt">${title}</div>` : ""}<div class="kg">${line}</div></div>`;
-      const powerTile = `<div class="ct"><div class="ctn">${P.view === "day" ? "Power" : "Energy"}</div><div class="ctd">Above the line, what ran the house. Below it, what was stored or sold.</div>
-        <div class="ck">${grp("House from", `${sw(FILL.Sh)}solar ${sw(FILL.Bh)}battery ${sw(FILL.Gh)}grid`)}${grp("Battery from", `${sw(FILL.Sb)}solar ${sw(FILL.Gb)}grid`)}${grp("", `${sw(null, " hatch")}Solar sold`)}</div></div>`;
+      // a statement under a key (when the battery crosses its reserve, the period's share) stays small, on one line
+      const say = (line) => `<div class="kgp"><div class="kg say">${line}</div></div>`;
+      // one key: each source once, in the colour it has everywhere (a tint of it below the line is the same source,
+      // stored), and solar sold
+      const powerTile = `<div class="ct"><div class="ctn">${P.view === "day" ? "Power" : "Energy"}</div>
+        <div class="ck">${grp("", `${sw(FILL.Sh)}Solar`)}${grp("", `${sw(FILL.Bh)}Battery`)}${grp("", `${sw(FILL.Gh)}Grid`)}${grp("", `${sw("var(--x1-sold)")}Solar sold`)}</div></div>`;
+      const when = s2.when;
       const battTile = P.view === "day"
-        ? `<div class="ct"><div class="ctn">Battery</div><div class="ck">${grp("", `${sw(null, " fill")}State of charge`)}${grp("", `${sw(null, " line")}Reserve ${f.num(res)}%`)}${when ? grp("", `<b>${esc(when)}</b>`) : ""}</div></div>`
-        : `<div class="ct"><div class="ctn">Self-sufficient</div><div class="ctd">The house's use not bought from the grid.</div><div class="ck">${grp("", `${sw("var(--x1-solar)")}solar ${sw("var(--x1-batt)")}battery`)}${T && T.selfSuff !== null ? grp("", `<b>${f.num(T.selfSuff * 100)}% over the period</b>`) : ""}</div></div>`;
+        ? `<div class="ct"><div class="ctn">Battery</div><div class="ck">${grp("", `${sw(null, " fill")}State of charge`)}${grp("", `${sw(null, " line")}Reserve ${f.num(res)}%`)}${when ? say(`<b>${esc(when)}</b>`) : ""}</div></div>`
+        : `<div class="ct"><div class="ctn">Self-sufficient</div><div class="ctd">The house's use not bought from the grid.</div><div class="ck">${grp("", `${sw("var(--x1-solar)")}solar ${sw("var(--x1-batt)")}battery`)}${T && T.selfSuff !== null ? say(`<b>${f.num(T.selfSuff * 100)}% over the period</b>`) : ""}</div></div>`;
       const axis = (chip) => `<div class="mg-axis"><svg width="${sw_}" height="${axisH}" aria-hidden="true">${this._axis(P, sx, padL, pw, markX)}${chip ? `<g data-xt visibility="hidden"><line data-xtl y1="0" y2="6" stroke="var(--x1-ink2)"/><rect data-xtb y="6" height="18" rx="4" fill="var(--x1-well)"/><text data-xtt y="19" text-anchor="middle" class="tick day now"></text></g>` : ""}</svg></div>`;
       const sw_ = sw_width;
       this._redrawing = true;
-      host.innerHTML = `<div class="mg" tabindex="0" role="img" aria-label="${esc(`${P.title}: ${P.view === "day" ? "power and battery" : "energy and self-sufficiency"}. Use the arrow keys to read values.`)}">
-        <section class="card chart" style="padding:${pad}px">${powerTile}<div class="cs"><div class="mg-p" style="height:${H1}px"><svg width="${sw_}" height="${H1}" aria-hidden="true">${g1}</svg>${empty ? `<div class="mg-none small" style="left:${padL + 8}px">${esc(empty)}</div>` : ""}</div>${axis(false)}</div></section>
-        <section class="card chart" style="padding:${pad}px">${battTile}<div class="cs"><div class="mg-p" style="height:${H2}px"><svg width="${sw_}" height="${H2}" aria-hidden="true">${g2}</svg>${empty && !this._perror ? `<div class="mg-none small" style="left:${padL + 8}px">${esc(empty)}</div>` : ""}</div>${axis(true)}</div></section></div>`;
+      const aria = (what) => esc(`${P.title}: ${what}. Use the arrow keys to read values.`);
+      const none = (msg, left) => (msg ? `<div class="mg-none small" style="left:${left + 8}px">${esc(msg)}</div>` : "");
+      host.innerHTML = `<div class="mg" data-strip="0" tabindex="0" role="img" aria-label="${aria(P.view === "day" ? "power" : "energy")}">
+        <section class="card chart" style="padding:${pad}px">${powerTile}<div class="cs"><div class="mg-p" style="height:${H1}px"><svg width="${sw_}" height="${H1}" aria-hidden="true">${g1}</svg>${none(empty, padL)}</div>${axis(true)}</div></section></div>`;
+      // the power card fills its slot exactly, as the battery's does beside it: a head row taller or shorter than the
+      // estimate is measured once and the strip redrawn to fit
+      if (wide && !this._refit1) {
+        const off = Math.round(host.querySelector(".card").getBoundingClientRect().height - host.clientHeight);
+        if (off && (off < 0 || H1 > (this._tight ? 100 : 120))) { this._chromeFix = { k: fixKey, v: fix + off }; this._refit1 = true; try { this._drawChart(); } finally { this._refit1 = false; } return; }
+      }
+      const markup2 = () => `<div class="mg" data-strip="1" tabindex="0" role="img" aria-label="${aria(P.view === "day" ? "the battery's charge" : "self-sufficiency")}">
+        <section class="card chart" style="padding:${pad}px">${battTile}<div class="cs"><div class="mg-p" style="height:${H2}px"><svg width="${sw2}" height="${H2}" aria-hidden="true">${s2.g2}</svg>${none(this._perror ? "" : empty, padL2)}</div><div class="mg-axis"><svg width="${sw2}" height="${axisH}" aria-hidden="true">${this._axis(P, sx2, padL2, pw2, markX2)}</svg></div></div></section></div>`;
+      host2.innerHTML = markup2();
+      // the battery's card is always the power card's height: beside it on the desktop it fills the row they share,
+      // stacked under it it is measured against it
+      {
+        const card2 = host2.querySelector(".card"), chrome2 = card2.getBoundingClientRect().height - H2;
+        const target = wide ? host2.clientHeight : host.querySelector(".card").getBoundingClientRect().height, fit = Math.max(56, Math.floor(target - chrome2));
+        if (Math.abs(fit - H2) > 1) { H2 = fit; s2 = strip2(H2); host2.innerHTML = markup2(); }
+      }
+      this._mgGeom.strips.push({ H: H2, sy: s2.sy2, sx: sx2, padL: padL2, pw: pw2 });
       this._redrawing = false;
       this._bindChart();
       const keep = !!this._mgHold && this._mgT != null && this._mgT >= x0 && this._mgT < x1;
@@ -1584,17 +1815,21 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     }
 
     _bindChart() {
-      const mg = this._root.querySelector(".mg"), G = this._mgGeom;
-      if (!mg || !G) return;
-      const P = G.P, buckets = this._data?.buckets ?? [];
+      const G = this._mgGeom;
+      if (!G) return;
+      this._root.querySelectorAll(".mg[data-strip]").forEach((mg) => this._bindStrip(mg, G.strips[Number(mg.dataset.strip)] ?? G.strips[0]));
+    }
+    // each strip maps the pointer through its own scale; the reading it starts is shared
+    _bindStrip(mg, S) {
+      const G = this._mgGeom, P = G.P, buckets = this._data?.buckets ?? [];
       const snap = (t) => { const b = buckets.find((x) => t >= x.t && t < x.t1) ?? buckets[buckets.length - 1]; return b ? b.t : null; };
       const clampT = (t) => Math.max(P.t0, Math.min(P.t1 - 1, t));
       const fromEvent = (e) => {
         const svg = e.target.closest?.(".mg-p svg, .mg-axis svg") ?? (this._mgTouch === e.pointerId ? mg.querySelector(".mg-p svg") : null);
         if (!svg) return null;
         const r = svg.getBoundingClientRect(), x = e.clientX - r.left;
-        if (x < G.padL || x > G.padL + G.pw) return null;
-        return snap(clampT(P.t0 + ((x - G.padL) / G.pw) * (P.t1 - P.t0)));
+        if (x < S.padL || x > S.padL + S.pw) return null;
+        return snap(clampT(P.t0 + ((x - S.padL) / S.pw) * (P.t1 - P.t0)));
       };
       const scrub = (e) => { const t = fromEvent(e); if (t !== null) { this._mgHold = "pointer"; this._mgShow(t); } };
       mg.addEventListener("pointerdown", (e) => { if (e.pointerType === "mouse" || !e.isPrimary) return; const t = fromEvent(e); if (t === null) return; this._mgTouch = e.pointerId; try { mg.setPointerCapture(e.pointerId); } catch (err) { /* lifted */ } this._mgHold = "pointer"; this._mgShow(t); });
@@ -1620,7 +1855,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (!G || !this._root) return;
       const P = G.P, f = this._fmt();
       this._mgT = t;
-      const xh = this._root.querySelectorAll(".mg [data-xh]");
+      const xh = this._root.querySelectorAll(".mg[data-strip] [data-xh]");
       const b = t === null ? null : (this._data?.buckets ?? []).find((x) => t >= x.t && t < x.t1);
       if (t === null || !b || b.empty) {
         xh.forEach((l) => l.setAttribute("visibility", "hidden"));
@@ -1629,8 +1864,11 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         return;
       }
       if (!this._hinted) { this._hinted = true; try { window.localStorage.setItem(HINT_KEY, "9"); } catch (e) { /* no storage */ } }
-      const x = P.view === "day" ? (G.sx(b.t) + G.sx(b.t1)) / 2 : (G.sx(b.t) + G.sx(b.t1)) / 2;
-      xh.forEach((l) => { l.setAttribute("x1", x.toFixed(1)); l.setAttribute("x2", x.toFixed(1)); l.setAttribute("visibility", "visible"); });
+      const x = (G.sx(b.t) + G.sx(b.t1)) / 2;
+      xh.forEach((l) => {
+        const S = G.strips[Number(l.closest(".mg").dataset.strip)] ?? G.strips[0], xs = (S.sx(b.t) + S.sx(b.t1)) / 2;
+        l.setAttribute("x1", xs.toFixed(1)); l.setAttribute("x2", xs.toFixed(1)); l.setAttribute("visibility", "visible");
+      });
       const when = P.view === "day" ? f.time(b.t) : P.view === "year" ? f.monY(b.t + 15 * DAY) : f.wdd(b.t + 12 * HOUR);
       this._renderLedger({ ...b, when: P.view === "day" ? `At ${when}${b.soc !== null && b.soc !== undefined ? ` · battery ${f.num(b.soc)}%` : ""}` : when });
       this._chip(when, x);
