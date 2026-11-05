@@ -1,6 +1,6 @@
 # Solix X1 Card
 
-A Home Assistant dashboard card for the Anker SOLIX X1 home battery system. It shows the battery and its reserve, what the house is running on right now in plain words, a drawing of the home with its power flowing, and the Anker cloud's own statistics for the day, the week, the month and the year. On a laptop it fits one screen without scrolling.
+A Home Assistant dashboard card for the Anker SOLIX X1 home battery system. It shows the battery and its reserve, what the house is running on right now, a drawing of the home with its power flowing, and the Anker cloud's own statistics for the day, the week, the month and the year. On a laptop it fits one screen without scrolling.
 
 **[Try it in your browser](https://treehouse-00.github.io/solix-x1-card/demo/)** with an invented home, no Home Assistant needed.
 
@@ -11,7 +11,7 @@ A Home Assistant dashboard card for the Anker SOLIX X1 home battery system. It s
 ## What it shows
 
 - **Battery.** The state of charge in a ring that carries the backup reserve, and what it means before anything else: "Lasts until 3:08 AM", "Full by 10:14 AM", "Not full today", or "Kept for outages" when only the reserve is left. Under it, the energy above or below the reserve and the battery's size.
-- **Now.** One line in words, such as "Running on solar, charging the battery.", over a drawing of the home: the panels on the roof, the battery towers at the foot of the wall, each filling with the charge, and the circuit through the X1. A line that carries power takes the colour of the energy on it, and beads drift along it the way the power goes.
+- **Now.** What the house runs on at a glance, over a drawing of the home: an icon for each source feeding it, in its colour (the sun, the battery, a power plant for the grid), then "Powered". The full sentence, such as "Running on solar, charging the battery.", is its tooltip and what a screen reader says. The drawing shows eight panels on the roof, each a grid of 48 by 48 pixels that light at random in proportion to what the array is making, none at night and all at its best; the battery towers at the foot of the wall, each filling with the charge; a box on the long wall where the house's line ends; and the circuit through the X1. A line that carries power takes the colour of the energy on it, and beads drift along it the way the power goes.
 - **The period.** For a day, a week, a month or a year: six headline figures (solar, house, bought, sold, charged, discharged) with the change against the previous period. A chart shows what ran the house above the line and what was stored or sold below it. A second chart shows the battery's charge through the day, or each day's self-sufficiency. Below the charts come the period's self-sufficiency, how much solar was kept, and what was saved. Hover, drag a finger across a chart, or use the arrow keys to read any moment, and download any period as CSV.
 
 ![A week, a month and a year](images/ranges.png)
@@ -58,6 +58,7 @@ With one X1 system, that's all it needs. The options:
 | `view` | `day` | The view to open on: `day`, `week`, `month` or `year`. Each viewer's last choice is remembered in their browser. |
 | `rate_import`, `rate_export` | — | What you pay for a kWh bought and are paid for one sold, in your home's currency. With a rate, the card prices what each period saved; without one, it shows Anker's lifetime saving. |
 | `capacity_kwh` | found automatically | The battery's capacity. The card multiplies the site's module count by one module's capacity; set it if that is wrong. |
+| `array_kw` | the best of the last 30 days | The most your array makes, in kW: every pixel on the drawn panels lights at this power. Its best clear-day output at noon is a good figure, and Anker's day history shows it; the panels' rating overstates it, so they would never fill. Left empty, the card uses the best five minutes it has seen in the last 30 days, which follows the seasons. |
 | `site` | found automatically | The Anker site id, if the card cannot find it from the integration's site device. |
 | `entities` | — | Overrides for renamed entities, for example `entities: { state_of_charge: sensor.my_x1_state_of_charge }`. |
 

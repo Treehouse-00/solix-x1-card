@@ -237,7 +237,7 @@
   };
 
   const card = document.createElement("solix-x1-card");
-  const config = { type: "custom:solix-x1-card", reserve: RESERVE };
+  const config = { type: "custom:solix-x1-card", reserve: RESERVE, array_kw: 7 };
   if (params.get("rate")) { config.rate_import = Number(params.get("rate")); config.rate_export = EXPORT; }
   // the card remembers each viewer's last view; the demo's links choose it instead
   try { localStorage.setItem("solix-x1-card:view", ["day", "week", "month", "year"].includes(params.get("view")) ? params.get("view") : "day"); } catch (e) { /* no storage */ }
