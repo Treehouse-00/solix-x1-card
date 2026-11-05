@@ -38,6 +38,12 @@
   const PEAK_KEY = "solix-x1-card:peaks";
   const NB = " ";
   const REFRESH_MS = 5 * 60e3;
+  // SOLIX X1 Live's readings come every 5 s while asked for: one older than LIVE_FRESH_MS is past, and the card asks
+  // again every KEEPALIVE_MS while it is on screen
+  const LIVE_FRESH_MS = 20e3, KEEPALIVE_MS = 60e3;
+  // the readings are kept in memory for LIVE_KEEP_MS and drawn as the day charts' tail, past the cloud's last
+  // 5-minute point, at most every LIVE_CHART_MS
+  const LIVE_KEEP_MS = 3 * 3600e3, LIVE_CHART_MS = 30e3;
   const LIVE_KEYS = ["state_of_charge", "solar_power", "home_demand", "grid_import", "grid_export", "charge_power", "discharge_power", "data_time", "cloud_state"];
   const SITE_KEYS = ["cost_savings", "co2_savings", "yield_total", "battery_modules", "parallel_devices", "connection"];
   const MODES = { 0: "Self-consumption", 1: "Time of use", 2: "Off-grid use", 11: "Bill saving", 16: "Time slots", 20: "AI energy management" };
@@ -145,6 +151,8 @@
   /* the sources keep one colour everywhere: solar amber, the battery blue, the grid violet; solar sold is green.
      The blue and the violet are set apart in lightness so they part for colour-blind eyes too (validated pairwise) */
   --x1-solar: #eda100; --x1-batt: #43a3e8; --x1-grid: #7b3fbf; --x1-sold: #2f9e5b; --x1-home: var(--x1-ink);
+  /* the lamp's Live: the weather station card's live green, so "Live" reads the same on both dashboards */
+  --x1-live: #3a9742;
   /* the icons' grade: amber is the faintest of the three on white and violet the faintest on black, so each is drawn a little fuller there */
   --x1-grade-solar: 1.5px; --x1-grade-grid: .5px;
   --x1-solar-tint: color-mix(in srgb, var(--x1-solar) 40%, var(--x1-surface)); --x1-grid-tint: color-mix(in srgb, var(--x1-grid) 40%, var(--x1-surface));
@@ -196,6 +204,7 @@
 }
 :host(.dark) {
   --x1-solar: #f2b036; --x1-batt: #62b4f0; --x1-grid: #9468e6; --x1-sold: #5ac28a; --x1-grid-line: #34342f; --x1-axis: #4a4a43;
+  --x1-live: #6ec272;
   --x1-grade-solar: .8px; --x1-grade-grid: 1.6px;
   --x1-tile: color-mix(in srgb, var(--x1-ink) 6.5%, var(--x1-surface)); --x1-tile-line: color-mix(in srgb, var(--x1-ink) 15%, var(--x1-surface));
   --x1-solar-tint: color-mix(in srgb, var(--x1-solar) 66%, var(--x1-surface)); --x1-grid-tint: color-mix(in srgb, var(--x1-grid) 62%, var(--x1-surface));
@@ -234,6 +243,13 @@
 .split .flow { margin-left: calc(-1 * var(--x1-pad)); margin-right: calc(-1 * var(--x1-pad)); align-items: flex-end; }
 .wide .card.now { gap: 12px; }
 .wide.tight .card.now { gap: 8px; }
+/* every card's title starts the same distance below its card's top edge, within half a pixel: on a desktop level
+   with the title bar's "Today" (capitals 16.6 px down), stacked at the charts' 20 px. Each top padding below is that
+   inset less the distance from its line's top to the capitals (6.6 px for a 16/24 title, 8.6 px in the title bar,
+   6 px for a 14/20 chart name), rounded to a whole pixel so no card edge falls between pixels */
+.wide .card.now { padding-top: 10px; }
+.narrow .card.now { padding-top: 13px; }
+.narrow .pbar { padding-top: 11px; }
 /* the drawing's card under the title bar: the drawing rooted at the card's left edge, cut there as the house runs off
    it, with twice the chart cards' padding above and below; on a wide screen a panel on its right holds the line of
    sources at the top, level with the top figures, and the battery's ring under it */
@@ -303,9 +319,14 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
 .meta { font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .unit { font-size: var(--x1-fs-body); color: var(--x1-ink2); margin-left: 2px; font-weight: var(--x1-w-regular); }
 .lamp { display: inline-flex; align-items: baseline; gap: 6px; font-size: var(--x1-fs-small); line-height: 16px; color: var(--x1-ink2); margin-left: auto; white-space: nowrap; }
-.lamp i { width: 9px; height: 9px; border-radius: 50%; background: var(--x1-ink2); flex: none; }
+.lamp i { position: relative; width: 9px; height: 9px; border-radius: 50%; background: var(--x1-ink2); flex: none; transition: background-color .4s; }
 .lamp.stale i { background: transparent; border: 1.5px dashed var(--x1-ink2); }
 .lamp.unknown i { background: transparent; border: 1.5px solid var(--x1-ink2); }
+/* the X1's own readings: the dot is green and beats once with each one, a ring opening out of it every 5 s;
+   the cloud's 5-minute figures keep the still grey dot */
+.lamp.live { color: var(--x1-ink); gap: 10px; }
+.lamp.live i { background: var(--x1-live); }
+.lamp i b { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid var(--x1-live); opacity: 0; pointer-events: none; }
 
 /* The Now column: the battery, what it means, the flow, today's four figures. */
 .hero-row { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
@@ -552,7 +573,14 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (!this._ents) { if (!this._missing) { this._missing = true; this._renderMissing(); } return; }
       this._missing = false;
       if (!this.isConnected) return;
-      const key = `${dark}|${Object.values(this._ents).map((id) => hass.states[id]?.last_updated ?? "").join("|")}`;
+      // SOLIX X1 Live may be added after the card loaded: look for its sensor every 10 s until it appears
+      if (!this._ents.live && (this._liveLook === undefined || performance.now() - this._liveLook > 10e3)) {
+        this._liveLook = performance.now();
+        const live = this._findLive();
+        if (live) this._ents = { ...this._ents, live };
+      }
+      this._keepAlive();
+      const key =`${dark}|${Object.values(this._ents).map((id) => hass.states[id]?.last_updated ?? "").join("|")}`;
       if (!first && this._mounted && key === this._hassKey) return;
       this._hassKey = key;
       if (first || !this._mounted) { this._mount(); this._refresh(); }
@@ -567,12 +595,19 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       this._tick = setInterval(() => this._applyLive(), 10e3);
       this._onResize = this._onResize ?? (() => this._layout());
       window.addEventListener("resize", this._onResize);
+      this._ka = setInterval(() => this._keepAlive(), KEEPALIVE_MS);
+      this._onVis = this._onVis ?? (() => { if (document.visibilityState === "visible") this._keepAlive(); });
+      document.addEventListener("visibilitychange", this._onVis);
+      if (!this._io && "IntersectionObserver" in window) this._io = new IntersectionObserver((es) => { this._onScreen = es.some((e) => e.isIntersecting); if (this._onScreen) this._keepAlive(); });
+      this._io?.observe(this);
       // hass may have arrived before the card was in the document
       if (this._hass && this._ents && !this._mounted) { this._hassKey = null; this._mount(); this._refresh(); }
     }
     disconnectedCallback() {
-      clearInterval(this._timer); clearInterval(this._tick); clearTimeout(this._rz);
+      clearInterval(this._timer); clearInterval(this._tick); clearInterval(this._ka); clearTimeout(this._rz);
       window.removeEventListener("resize", this._onResize);
+      document.removeEventListener("visibilitychange", this._onVis);
+      this._io?.disconnect();
       this._ro?.disconnect(); this._mounted = false;
     }
 
@@ -596,6 +631,8 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (sbest) for (const [k, id] of Object.entries(sbest[1])) ents["site_" + k] = id;
       const acct = Object.keys(states).find((id) => id.startsWith("switch.") && id.endsWith("_api_usage"));
       if (acct) ents.account = acct;
+      const live = this._findLive();
+      if (live) ents.live = live;
       for (const [k, id] of Object.entries(over)) ents[k] = id;
       this._ents = ents;
       // capacity: the site's module count times one module's capacity. The count comes from the site, since Home
@@ -610,6 +647,20 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       this._capacity = this._config.capacity_kwh ?? (per > 0 && n > 0 ? (per * n) / 1000 : null);
       this._packs = n || null;
       this._cache = this._cache ?? {};
+    }
+    // SOLIX X1 Live, when it is installed: the X1's own readings every 5 s, its sensor marked by an x1_live attribute
+    _findLive() {
+      const states = this._hass.states;
+      return Object.keys(states).find((id) => id.startsWith("sensor.") && states[id].attributes?.x1_live) ?? null;
+    }
+    // It sends them only while asked: once a minute while the card is on screen in a visible page, so the X1 streams
+    // while someone looks and stops a few minutes after, as the Anker app does
+    _keepAlive() {
+      if (!this._hass?.services?.solix_x1_live?.keep_alive || !this.isConnected || document.visibilityState === "hidden" || this._onScreen === false) return;
+      const t = performance.now();
+      if (this._kaAt !== undefined && t - this._kaAt < KEEPALIVE_MS - 5e3) return;
+      this._kaAt = t;
+      Promise.resolve(this._hass.callService("solix_x1_live", "keep_alive", {})).catch(() => {});
     }
     _st(k) { const id = this._ents?.[k]; return id ? this._hass.states[id] : undefined; }
     _money(v, dp = 0) {
@@ -630,8 +681,14 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     _live() {
       const f = this._fmt(), now = Date.now();
       const kw = (k) => this._num(k);
-      const soc = kw("state_of_charge"), solar = kw("solar_power") ?? 0, home = kw("home_demand") ?? 0;
-      const imp = kw("grid_import") ?? 0, exp = kw("grid_export") ?? 0, chg = kw("charge_power") ?? 0, dis = kw("discharge_power") ?? 0;
+      let soc = kw("state_of_charge"), solar = kw("solar_power") ?? 0, home = kw("home_demand") ?? 0;
+      let imp = kw("grid_import") ?? 0, exp = kw("grid_export") ?? 0, chg = kw("charge_power") ?? 0, dis = kw("discharge_power") ?? 0;
+      // the X1's own 5-second reading, while it is fresh, in place of the cloud's 5-minute averages
+      const lv = this._liveReading(now);
+      if (lv) {
+        soc = lv.soc ?? soc; solar = lv.solar; home = lv.home;
+        imp = Math.max(0, lv.grid); exp = Math.max(0, -lv.grid); dis = Math.max(0, lv.batt); chg = Math.max(0, -lv.batt);
+      }
       // one reconciled set of flows (R1): the house is supplied by solar, the battery and the grid; solar goes to the house, the battery and the grid
       const Bd = Math.max(0, dis - chg), Bc = Math.max(0, chg - dis), Gi = Math.max(0, imp - exp), Ge = Math.max(0, exp - imp);
       const Sh = Math.max(0, Math.min(solar, home - Bd - Gi));
@@ -639,19 +696,36 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const Sb = Math.max(0, Math.min(Bc - Gb, solar - Sh));
       const Sg = Math.max(0, Math.min(Ge, solar - Sh - Sb));
       const Bg = Math.max(0, Math.min(Bd, Ge - Sg));
-      const flows = { Sh, Sb, Sg, Gh: Math.max(0, Gi - Gb), Gb, Bh: Math.max(0, Bd - Bg), Bg };
+      // the X1 measures its own splits; the cloud's averages are reconciled into them
+      const flows = lv?.flows ?? { Sh, Sb, Sg, Gh: Math.max(0, Gi - Gb), Gb, Bh: Math.max(0, Bd - Bg), Bg };
       const dt = Date.parse(String(this._st("data_time")?.state ?? "").replace(" ", "T"));
       const upd = Math.max(...LIVE_KEYS.map((k) => Date.parse(this._st(k)?.last_updated ?? "") || 0));
-      const age = now - (Number.isFinite(dt) ? Math.max(dt, upd - 5 * 60e3) : upd);
-      const online = this._st("site_connection") ? this._st("site_connection").state === "on" : this._st("cloud_state") ? this._st("cloud_state").state === "online" : true;
-      const stale = age > 10 * 60e3;
+      const age = lv ? Math.max(0, now - lv.t) : now - (Number.isFinite(dt) ? Math.max(dt, upd - 5 * 60e3) : upd);
+      const online = lv ? true : this._st("site_connection") ? this._st("site_connection").state === "on" : this._st("cloud_state") ? this._st("cloud_state").state === "online" : true;
+      const stale = !lv && age > 10 * 60e3;
       const cap = this._capacity, reserve = clamp(Number(this._config.reserve) || 0, 0, 100);
       const usable = soc !== null && cap ? Math.max(0, (soc - reserve) / 100) * cap : null;
       const hours = usable !== null && Bd > 0.05 ? usable / Bd : null;
       const toFull = soc !== null && cap && Bc > 0.05 ? ((100 - soc) / 100) * cap / Bc : null;
       const state = !online ? "unknown" : "on";
-      return { now, f, soc, solar, home, imp, exp, chg, dis, flows, age, stale, online, state, cap, reserve, usable, hours, toFull,
+      return { now, f, soc, solar, home, imp, exp, chg, dis, flows, age, stale, online, state, live: !!lv, reading: lv, cap, reserve, usable, hours, toFull,
         savings: this._num("site_cost_savings"), co2: this._num("site_co2_savings"), yieldMwh: this._num("site_yield_total"), packs: this._packs ?? this._num("site_battery_modules"), towers: this._parallel ?? this._num("site_parallel_devices") };
+    }
+
+    // SOLIX X1 Live's last reading in kW, or null when there is none or it is older than LIVE_FRESH_MS. Signs: battery
+    // + discharging, grid + buying. The splits are used only when all seven are there.
+    _liveReading(now) {
+      const s = this._st("live"), a = s?.attributes;
+      if (!a) return null;
+      const t = Date.parse(s.state);
+      if (!Number.isFinite(t) || Math.abs(now - t) > LIVE_FRESH_MS) return null;
+      const kw = (k) => { const v = a[k] === null || a[k] === undefined || a[k] === "" ? NaN : Number(a[k]); return Number.isFinite(v) ? v / 1000 : null; };
+      const solar = kw("solar_w"), home = kw("home_w"), batt = kw("battery_w"), grid = kw("grid_w");
+      if (solar === null || home === null || batt === null || grid === null) return null;
+      const split = { Sh: kw("solar_to_home_w"), Sb: kw("solar_to_battery_w"), Sg: kw("solar_to_grid_w"), Bh: kw("battery_to_home_w"), Bg: kw("battery_to_grid_w"), Gh: kw("grid_to_home_w"), Gb: kw("grid_to_battery_w") };
+      const soc = a.soc === null || a.soc === undefined || a.soc === "" ? NaN : Number(a.soc);
+      return { t, soc: Number.isFinite(soc) ? clamp(soc, 0, 100) : null, solar: Math.max(0, solar), home: Math.max(0, home), batt, grid,
+        flows: Object.values(split).every((v) => v !== null) ? Object.fromEntries(Object.entries(split).map(([k, v]) => [k, Math.max(0, v)])) : null };
     }
 
     // One line in words: what the house is running on and what the rest of the system is doing. The figures live in
@@ -769,14 +843,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
           const S = Math.max(0, series.solar[i] ?? 0), L = Math.max(0, series.home[i] ?? 0), B = series.hes[i] ?? 0, G = series.grid[i] ?? 0;
           out.push({ t, t1: t + FIVE_MIN, ...flowsOf(S, L, B, G), soc: soc[i] ?? null, kw: true });
         }
-        // short gaps are bridged with the neighbours' average so the areas and the charge line stay whole
-        for (let i = 0; i < out.length; i++) {
-          if (!out[i].gap) continue;
-          let j = i; while (j < out.length && out[j].gap) j++;
-          const a = out[i - 1], b = out[j];
-          if (a && b && !a.empty && !b.empty && j - i <= 6) for (let k = i; k < j; k++) { const w = (k - i + 1) / (j - i + 1); const mix = {}; for (const key of ["S", "L", "Bd", "Bc", "Gi", "Ge", "Sh", "Sb", "Sg", "Gh", "Gb", "Bh"]) mix[key] = a[key] * (1 - w) + b[key] * w; out[k] = { t: out[k].t, t1: out[k].t1, ...mix, soc: a.soc !== null && b.soc !== null ? a.soc * (1 - w) + b.soc * w : null, kw: true, bridged: true }; }
-          i = j;
-        }
+        bridgeGaps(out);
       } else if (P.view === "year") {
         for (let mo = 0; mo < 12; mo++) {
           const t = f.midnight(`${P.anchor}-${pad2(mo + 1)}-01`), t1 = mo === 11 ? P.t1 : f.midnight(`${P.anchor}-${pad2(mo + 2)}-01`);
@@ -1028,7 +1095,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     _nowCol() {
       const name = this._config.name || "Home";
       return `<section class="col-now"><section class="card now">
-        <div class="head"><h2>${esc(name)}</h2><span class="meta" data-k="mode"></span><span class="lamp" data-k="lamp"><i></i><span data-k="lamp-t"></span></span></div>
+        <div class="head"><h2>${esc(name)}</h2><span class="meta" data-k="mode"></span><span class="lamp" data-k="lamp"><i><b></b></i><span data-k="lamp-t"></span></span></div>
         <div class="heads" data-ledger>${["Solar", "House", "Bought", "Sold", "Charged", "Discharged"].map((n) => `<div class="cell card"><div class="cn">${n}</div><div class="cv">—</div><div class="cd"></div></div>`).join("")}</div></section>
         <section class="card meaning"><div class="rings" data-rings></div>
         <div class="foot"><span data-k="foot">Anker cloud statistics</span><span class="fr" data-k="footr"></span></div></section>
@@ -1043,10 +1110,18 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       set("mode", this._modeWord ?? "");
       const lamp = this._root.querySelector('[data-k="lamp"]');
       if (lamp) {
-        const cls = `lamp ${L.state === "unknown" ? "unknown" : L.stale ? "stale" : "on"}`;
+        const cls = `lamp ${L.state === "unknown" ? "unknown" : L.live ? "on live" : L.stale ? "stale" : "on"}`;
         if (lamp.className !== cls) lamp.className = cls;
-        // what the lamp knows is the cloud's connection and the data's age; nothing reports the grid's state
-        set("lamp-t", L.state === "unknown" ? "Cloud unreachable" : L.stale ? `Last update ${f.ago(L.age)}` : `Updated ${f.ago(L.age)}`);
+        // what the lamp knows is where the figures come from and their age; nothing reports the grid's state
+        set("lamp-t", L.state === "unknown" ? "Cloud unreachable" : L.live ? "Live" : L.stale ? `Last update ${f.ago(L.age)}` : `Updated ${f.ago(L.age)}`);
+        const title = L.live ? "Live: the X1's own readings, every 5 seconds" : L.state === "unknown" ? "Anker's cloud can't be reached" : "Anker's cloud: figures every 5 minutes";
+        if (lamp.title !== title) lamp.title = title;
+        // the beat: once per reading, never twice for one, and not at all with reduced motion
+        if (L.live && L.reading.t !== this._beatT) {
+          this._beatT = L.reading.t;
+          // the ring grows by its box, not a transform, so its line stays 1.5 px as it opens out
+          if (this._motion()) lamp.querySelector("b")?.animate([{ inset: "0px", opacity: 0 }, { inset: "-1.5px", opacity: 0.8, offset: 0.12 }, { inset: "-6px", opacity: 0 }], { duration: 1400, easing: "cubic-bezier(.2,.6,.35,1)" });
+        }
       }
       this._drawRing(L);
       set("h1", L.cap ? `${f.num(L.cap, 0)}${NB}kWh in ${L.packs ?? "—"} packs` : `${L.packs ?? "—"} packs`);
@@ -1054,6 +1129,46 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       set("h2", L.soc === null || !L.cap ? resWord : L.soc < L.reserve - 0.5 ? `${f.num(((L.reserve - L.soc) / 100) * L.cap, 1)}${NB}kWh below the ${resWord}` : L.usable < 0.05 ? `At the ${resWord}` : `${f.num(L.usable, 1)}${NB}kWh above the ${resWord}`);
       this._drawPowered(L);
       this._drawFlow();
+      if (L.reading && L.reading.t !== this._liveT) { this._liveT = L.reading.t; this._keepReading(L); this._liveChart(); }
+    }
+
+    // Each fresh reading is kept for the day charts' tail, in the buckets' terms (kW; flows as the chart splits them)
+    _keepReading(L) {
+      const buf = (this._liveBuf = this._liveBuf ?? []);
+      buf.push({ t: L.reading.t, S: L.solar, L: L.home, Bd: L.dis, Bc: L.chg, Gi: L.imp, Ge: L.exp, ...L.flows, soc: L.soc });
+      while (buf.length && buf[0].t < L.reading.t - LIVE_KEEP_MS) buf.shift();
+    }
+    // The tail is redrawn at most every LIVE_CHART_MS, and never while a chart is being read with the keys or holds
+    // the focus, which a redraw would take away
+    _liveChart() {
+      const P = this._P;
+      if (!P?.isNow || P.view !== "day" || !this._data || !this._root) return;
+      if (this._chartAt !== undefined && performance.now() - this._chartAt < LIVE_CHART_MS) return;
+      if (this._mgHold === "key" || this._root.activeElement?.closest?.(".mg")) return;
+      this._drawChart();
+    }
+    // The day's buckets with the readings folded in where the cloud's series has not reached: each bucket after the
+    // cloud's last point that holds readings is their average, and a short hole between the two is bridged
+    _withLive(P, buckets) {
+      const buf = this._liveBuf;
+      if (!P?.isNow || P.view !== "day" || !buf?.length || !buckets.length) return buckets;
+      let last = buckets.length - 1;
+      while (last >= 0 && (buckets[last].empty || buckets[last].bridged)) last--;
+      const out = buckets.slice(), keys = ["S", "L", "Bd", "Bc", "Gi", "Ge", "Sh", "Sb", "Sg", "Gh", "Gb", "Bh"];
+      let added = false;
+      for (let i = last + 1; i < out.length; i++) {
+        const b = out[i], rs = buf.filter((r) => r.t >= b.t && r.t < b.t1);
+        if (!rs.length) continue;
+        const avg = {};
+        for (const k of keys) avg[k] = rs.reduce((a, r) => a + (r[k] ?? 0), 0) / rs.length;
+        const socs = rs.filter((r) => r.soc !== null && r.soc !== undefined);
+        out[i] = { t: b.t, t1: b.t1, ...avg, soc: socs.length ? socs[socs.length - 1].soc : null, kw: true, live: true };
+        added = true;
+      }
+      if (!added) return buckets;
+      // between the cloud's last point and the first reading the buckets are gaps again, so a short hole is bridged
+      for (let i = last + 1; i < out.length && !out[i].live; i++) if (out[i].empty && !out[i].gap) out[i] = { ...out[i], gap: true };
+      return bridgeGaps(out);
     }
 
     // Above the drawing, what the house runs on at a glance: an icon for each source feeding it, in its colour and in
@@ -1570,20 +1685,22 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       if (!host || !host2 || !P) return;
       const f = this._fmt(), narrow = this._mode() === "narrow", wide = this._mode() === "wide";
       const W = Math.max(240, host.clientWidth), total = wide ? host.clientHeight : narrow ? 380 : 300;
-      const pad = this._tight ? 10 : 14, axisH = 24;
+      // on a desktop the charts' names start level with the title bar's "Today" (see .card.now's padding-top)
+      const pad = this._tight ? 10 : 14, padTop = narrow ? pad : 11, axisH = 24;
       const sw_width = Math.max(200, W - 2 * pad - 2);
       const x0 = P.t0, x1 = P.t1;
       // the power card spends its padding, its border, its head row (its name and key: one 20 px line and the row gap,
       // or wrapped to two lines on a phone) and its axis; the rest is strip
       // (on a wide screen the head row is measured after a first drawing, since its height follows the theme's fonts)
       const fixKey = `${this._tight}`, fix = wide && this._chromeFix?.k === fixKey ? this._chromeFix.v : 0;
-      const chrome = 2 * pad + axisH + 2 + (narrow ? 60 : 28) + fix;
+      const chrome = padTop + pad + axisH + 2 + (narrow ? 60 : 28) + fix;
       const H1 = Math.max(this._tight ? 100 : 120, total - chrome);
       // the battery's strip: in the wide layout it takes the height the Now column leaves it (fitted after a first
       // drawing measures its key and axis); stacked, a fixed height
       let H2 = narrow ? 96 : 80;
       const W2 = Math.max(200, host2.clientWidth), sw2 = Math.max(160, W2 - 2 * pad - 2);
-      const buckets = D?.buckets ?? [];
+      const buckets = this._withLive(P, D?.buckets ?? []);
+      this._drawn = buckets; this._chartAt = performance.now();
       const have = buckets.filter((b) => !b.empty);
       // strip 1's scale and ticks come first, so the tick column is as wide as the widest label it draws
       const up = (b) => (b.empty ? 0 : b.Sh + b.Bh + b.Gh), dn = (b) => (b.empty ? 0 : b.Sb + b.Gb + b.Sg);
@@ -1647,8 +1764,8 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         area((b) => -b.Sb, () => 0, FILL.Sb);
         area((b) => -b.Gb, (b) => -b.Sb, FILL.Gb);
         area((b) => -b.Sg, (b) => -b.Sb - b.Gb, FILL.Sg);
-        // where the cloud's series ends short of now, the edge says so
-        const last = have[have.length - 1];
+        // where the cloud's series ends short of now, the edge says so (the live tail after it is the X1's own)
+        const last = [...have].reverse().find((b) => !b.live && !b.bridged);
         if (P.isNow && last && Date.now() - last.t1 > 10 * 60e3) {
           // in the top margin, which no area reaches, ending at the series' end; over the zero line only when the series
           // ends so early that the note would meet the half's caption
@@ -1763,7 +1880,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const aria = (what) => esc(`${P.title}: ${what}. Use the arrow keys to read values.`);
       const none = (msg, left) => (msg ? `<div class="mg-none small" style="left:${left + 8}px">${esc(msg)}</div>` : "");
       host.innerHTML = `<div class="mg" data-strip="0" tabindex="0" role="img" aria-label="${aria(P.view === "day" ? "power" : "energy")}">
-        <section class="card chart" style="padding:${pad}px">${powerTile}<div class="cs"><div class="mg-p" style="height:${H1}px"><svg width="${sw_}" height="${H1}" aria-hidden="true">${g1}</svg>${none(empty, padL)}</div>${axis(true)}</div></section></div>`;
+        <section class="card chart" style="padding:${padTop}px ${pad}px ${pad}px">${powerTile}<div class="cs"><div class="mg-p" style="height:${H1}px"><svg width="${sw_}" height="${H1}" aria-hidden="true">${g1}</svg>${none(empty, padL)}</div>${axis(true)}</div></section></div>`;
       // the power card fills its slot exactly, as the battery's does beside it: a head row taller or shorter than the
       // estimate is measured once and the strip redrawn to fit
       if (wide && !this._refit1) {
@@ -1771,7 +1888,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
         if (off && (off < 0 || H1 > (this._tight ? 100 : 120))) { this._chromeFix = { k: fixKey, v: fix + off }; this._refit1 = true; try { this._drawChart(); } finally { this._refit1 = false; } return; }
       }
       const markup2 = () => `<div class="mg" data-strip="1" tabindex="0" role="img" aria-label="${aria(P.view === "day" ? "the battery's charge" : "self-sufficiency")}">
-        <section class="card chart" style="padding:${pad}px">${battTile}<div class="cs"><div class="mg-p" style="height:${H2}px"><svg width="${sw2}" height="${H2}" aria-hidden="true">${s2.g2}</svg>${none(this._perror ? "" : empty, padL2)}</div><div class="mg-axis"><svg width="${sw2}" height="${axisH}" aria-hidden="true">${this._axis(P, sx2, padL2, pw2, markX2)}</svg></div></div></section></div>`;
+        <section class="card chart" style="padding:${padTop}px ${pad}px ${pad}px">${battTile}<div class="cs"><div class="mg-p" style="height:${H2}px"><svg width="${sw2}" height="${H2}" aria-hidden="true">${s2.g2}</svg>${none(this._perror ? "" : empty, padL2)}</div><div class="mg-axis"><svg width="${sw2}" height="${axisH}" aria-hidden="true">${this._axis(P, sx2, padL2, pw2, markX2)}</svg></div></div></section></div>`;
       host2.innerHTML = markup2();
       // the battery's card is always the power card's height: beside it on the desktop it fills the row they share,
       // stacked under it it is measured against it
@@ -1821,7 +1938,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
     }
     // each strip maps the pointer through its own scale; the reading it starts is shared
     _bindStrip(mg, S) {
-      const G = this._mgGeom, P = G.P, buckets = this._data?.buckets ?? [];
+      const G = this._mgGeom, P = G.P, buckets = this._drawn ?? this._data?.buckets ?? [];
       const snap = (t) => { const b = buckets.find((x) => t >= x.t && t < x.t1) ?? buckets[buckets.length - 1]; return b ? b.t : null; };
       const clampT = (t) => Math.max(P.t0, Math.min(P.t1 - 1, t));
       const fromEvent = (e) => {
@@ -1856,7 +1973,7 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
       const P = G.P, f = this._fmt();
       this._mgT = t;
       const xh = this._root.querySelectorAll(".mg[data-strip] [data-xh]");
-      const b = t === null ? null : (this._data?.buckets ?? []).find((x) => t >= x.t && t < x.t1);
+      const b = t === null ? null : (this._drawn ?? this._data?.buckets ?? []).find((x) => t >= x.t && t < x.t1);
       if (t === null || !b || b.empty) {
         xh.forEach((l) => l.setAttribute("visibility", "hidden"));
         this._renderLedger(null);
@@ -1952,6 +2069,17 @@ h2 { font-size: var(--x1-fs-title); line-height: 24px; font-weight: var(--x1-w-m
   }
 
   // Reconciled flows from one bucket's powers (kW) or energies (kWh): solar S, house L, battery B (+ discharging), grid G (+ importing).
+  // Short gaps in a day's buckets are bridged with the neighbours' average so the areas and the charge line stay whole.
+  function bridgeGaps(out) {
+    for (let i = 0; i < out.length; i++) {
+      if (!out[i].gap) continue;
+      let j = i; while (j < out.length && out[j].gap) j++;
+      const a = out[i - 1], b = out[j];
+      if (a && b && !a.empty && !b.empty && j - i <= 6) for (let k = i; k < j; k++) { const w = (k - i + 1) / (j - i + 1); const mix = {}; for (const key of ["S", "L", "Bd", "Bc", "Gi", "Ge", "Sh", "Sb", "Sg", "Gh", "Gb", "Bh"]) mix[key] = a[key] * (1 - w) + b[key] * w; out[k] = { t: out[k].t, t1: out[k].t1, ...mix, soc: a.soc !== null && b.soc !== null ? a.soc * (1 - w) + b.soc * w : null, kw: true, bridged: true }; }
+      i = j;
+    }
+    return out;
+  }
   function flowsOf(S, L, B, G) {
     const Bd = Math.max(0, B), Bc = Math.max(0, -B), Gi = Math.max(0, G), Ge = Math.max(0, -G);
     return flowsOfEnergy(S, L, Bd, Gi, Ge, Bc);
