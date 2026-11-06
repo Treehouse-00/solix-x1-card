@@ -16,6 +16,7 @@
 - **The battery first.** Its charge in a ring that marks your backup reserve, with the energy above or below it.
 - **The home, drawn.** Solar, the battery, the grid and the house as one drawing. Each line takes the colour of the power on it and drifts the way it goes, faster as it carries more, and the panels light pixel by pixel with what the array makes.
 - **Anker's own figures.** The day, the week, the month and the year from the cloud's statistics, the same as the Anker app's, each compared fairly with the period before.
+- **Live, if you add it.** With [SOLIX X1 Live](https://github.com/Treehouse-00/solix-x1-live), the drawing, the ring and the power chart's newest minutes follow the X1's own readings every 5 seconds while the card is on screen.
 - **Any moment.** Hover, drag a finger or use the arrow keys across either chart to read both at that moment, and download any period as CSV.
 - **Any screen.** A laptop sees all of it without scrolling; a tablet or a phone gets the same cards, stacked. Light and dark follow your theme.
 - **Private.** It runs in your browser against your own Home Assistant and makes no outside requests.
@@ -31,7 +32,7 @@
 - **The drawing.** "Powered" names the sources feeding the house; its full sentence (such as "Running on solar, charging the battery.") is its tooltip and what a screen reader says. The panels' lit share is the array's output over the most it makes. Each battery tower fills with the charge, and the mark across it is the reserve.
 - **The power chart.** Above the line, what the house used, in the colour of what met it; below it, what charged the battery and what was sold. The week, the month and the year show a bar for each day or month.
 - **The figures.** Six headline totals (solar, house, bought, sold, charged, discharged) with the change against the previous period, then the period's self-sufficiency, how much solar was kept, and what was saved.
-- **The dot by the place's name** says how fresh the live figures are: solid while they are current, dashed after ten minutes, hollow when the cloud cannot be reached. Old figures are then said in the past tense, and the flow stops.
+- **The dot by the place's name** says how fresh the live figures are: solid while they are current, dashed after ten minutes, hollow when the cloud cannot be reached. Old figures are then said in the past tense, and the flow stops. With SOLIX X1 Live, it says **Live**, turns green and beats once for each reading while the X1's own readings are current.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/ranges-dark.png">
@@ -49,6 +50,7 @@
 
 - Home Assistant 2025.12 or newer, which the Anker Solix integration requires. The card was developed and tested on 2026.10.
 - The [Anker Solix integration](https://github.com/thomluther/ha-anker-solix) by Thomas Luther, set up with the account that owns the X1 system. The card was tested with version 3.9.1. It finds the Backup Controller's live sensors, the site's totals and the account's **API usage** switch by itself.
+- Optional: [SOLIX X1 Live](https://github.com/Treehouse-00/solix-x1-live), an integration that adds the X1's own readings every 5 seconds. The card finds its sensor by itself and asks for the readings only while it is on screen in a visible tab.
 - The history comes from Anker's cloud through the integration's `anker_solix.api_request` action, so every view shows the Anker app's own figures from the day the system was installed. A change of view asks for at most eight answers, and periods that are over are kept for the session.
 
 ## Install
@@ -106,7 +108,7 @@ With one X1 system, that's all it needs. The options:
 
 - **One set of flows.** Solar is split into what the house took, what the battery stored and what was sold, and the house's use into what came from solar, the battery and the grid. Both sums hold in every view, the CSV included.
 - **Honest comparisons.** A period still running is compared with the same part of the previous one, not with the whole of it. A change against a very small figure is shown as a difference in kWh rather than a percentage.
-- **Data age.** The live figures are the cloud's 5-minute averages, which the integration polls once a minute. The card makes no claim about the grid's state, since the cloud does not report it.
+- **Data age.** The live figures are the cloud's 5-minute averages, which the integration polls once a minute. With SOLIX X1 Live, they are the X1's own readings while one is less than 20 seconds old, and the cloud's again after. The card makes no claim about the grid's state, since the cloud does not report it.
 - **Privacy.** Everything runs in your browser against your own Home Assistant. The card makes no outside requests: the history reaches it from Anker's cloud through the integration, with the account the integration already uses.
 
 ## Accessibility and motion
